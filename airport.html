@@ -222,6 +222,13 @@
   .cfg textarea{ min-height:70px; resize:vertical; line-height:1.4; }
   .cfg input:focus, .cfg select:focus, .cfg textarea:focus{ outline:none; border-color:var(--accent); }
   .cfg .row{ display:flex; gap:8px; } .cfg .row > div{ flex:1; min-width:0; }
+  .cfg .ckrow{ display:flex; gap:14px; flex-wrap:wrap; margin-top:2px; }
+  .cfg label.ck{
+    display:flex; align-items:center; gap:6px; margin:4px 0 0; cursor:pointer;
+    font:12.5px -apple-system,system-ui,sans-serif; color:var(--ink); text-transform:none; letter-spacing:0;
+  }
+  .cfg label.ck input{ width:auto; accent-color:var(--accent); margin:0; }
+  .cfg label.ck span{ color:var(--dim); font-size:10px; }
   .cfg .btns{ display:flex; gap:8px; margin-top:12px; }
   .cfg .btns button{
     flex:1; border-radius:8px; padding:8px; cursor:pointer; font:600 12px -apple-system,sans-serif;
@@ -773,6 +780,12 @@ function buildCfg(cfg){
     <input id="c-cwd" value="${esc(s.cwd || "")}">
     <label>allowed tools</label>
     <input id="c-tools" value="${esc(s.tools || "")}" placeholder="Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,TodoWrite">
+    <label>context <span class="warn">— any change = cold cache next run</span></label>
+    <div class="ckrow">
+      <label class="ck"><input type="checkbox" id="c-claudemd"${s.useClaudeMd ? " checked" : ""}> CLAUDE.md <span>(+ project skills/settings)</span></label>
+      <label class="ck"><input type="checkbox" id="c-memory"${s.useMemory !== false ? " checked" : ""}> memory <span>(MEMORY.md)</span></label>
+      <label class="ck"><input type="checkbox" id="c-skills"${s.useSkills !== false ? " checked" : ""}> skills</label>
+    </div>
     <label>system prompt <span class="warn">— any change = cold cache next run</span></label>
     <textarea id="c-sys" placeholder="empty = claude code's default">${esc(s.systemPrompt || "")}</textarea>
     <select id="c-sysmode" style="margin-top:6px">
@@ -798,6 +811,10 @@ function buildCfg(cfg){
     chint("cwd changed — transcript will be rebuilt there, cold cache");
   });
   on("c-tools", (el) => patch({ sessions: { [id]: { tools: el.value.trim() || null } } }));
+  // context checkboxes — stored canonically: only non-default values live in the doc
+  on("c-claudemd", (el) => { patch({ sessions: { [id]: { useClaudeMd: el.checked ? true : null } } }); chint("context changed — cold cache next run"); });
+  on("c-memory", (el) => { patch({ sessions: { [id]: { useMemory: el.checked ? null : false } } }); chint("context changed — cold cache next run"); });
+  on("c-skills", (el) => { patch({ sessions: { [id]: { useSkills: el.checked ? null : false } } }); chint("context changed — cold cache next run"); });
   on("c-sys", (el) => { patch({ sessions: { [id]: { systemPrompt: el.value.trim() ? el.value : null } } }); chint("system prompt saved — cold prefix next run"); });
   on("c-sysmode", (el) => patch({ sessions: { [id]: { systemMode: el.value } } }));
   cfg.querySelector("#c-fork").addEventListener("click", () => {
@@ -809,6 +826,7 @@ function buildCfg(cfg){
     patch({ sessions: { [fid]: {
       title: (s2.title || id) + " ⑂", emoji: s2.emoji || "🛩", host: s2.host, cwd: s2.cwd, model: s2.model, tools: s2.tools,
       systemPrompt: s2.systemPrompt, systemMode: s2.systemMode,
+      useClaudeMd: s2.useClaudeMd || null, useMemory: s2.useMemory === false ? false : null, useSkills: s2.useSkills === false ? false : null,
       x: Math.min(0.9, (s2.x || 0.5) + 0.1), y: Math.min(0.85, (s2.y || 0.5) + 0.07),
       createdAt: Date.now(), state: "ready", dirty: true, messages: copy,
     } } });
@@ -820,11 +838,20 @@ function buildCfg(cfg){
     else { btn.textContent = "✕ sure?"; btn.dataset.armed = "1"; }
   });
 }
+const CFG_CHECKS = [
+  ["c-claudemd", (s) => !!s.useClaudeMd],
+  ["c-memory",   (s) => s.useMemory !== false],
+  ["c-skills",   (s) => s.useSkills !== false],
+];
 function syncCfg(){
   const s = sess(view);
   for (const [fid, get] of CFG_FIELDS) {
     const el = document.getElementById(fid);
     if (el && document.activeElement !== el && el.value !== get(s)) el.value = get(s);
+  }
+  for (const [fid, get] of CFG_CHECKS) {
+    const el = document.getElementById(fid);
+    if (el && el.checked !== get(s)) el.checked = get(s);
   }
 }
 
@@ -944,7 +971,7 @@ function renderSession(){
   $("hdr-title").textContent = (s.emoji || emojiFor(view, s)) + " " + (s.title || view);
   const hot = s.running ? "flying" : isHot(s) ? `hot ${ago(s.lastRunEndedAt)}` : "cold";
   const off = !hostUp(s.host);
-  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.dirty ? " · edited⟲" : ""}`;
+  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}`;
   setStat(s.running ? "warn" : off ? "bad" : "ok", s.running ? "flying…" : off ? "airfield offline" : "live");
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");

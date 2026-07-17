@@ -211,6 +211,7 @@ function routeRun(id, text, fail) {
     host.send(JSON.stringify({ type: "run", session: id, prompt, history,
       meta: { cwd: s.cwd || "", model: s.model || "", systemPrompt: s.systemPrompt || "",
               systemMode: s.systemMode || "append", tools: s.tools || "",
+              useClaudeMd: !!s.useClaudeMd, useMemory: s.useMemory !== false, useSkills: s.useSkills !== false,
               claudeSessionId: s.claudeSessionId || null, sidHost: s.sidHost || null, dirty: !!s.dirty } }));
   } catch (_) {
     apply({ sessions: { [id]: { running: false, state: "ready" } } });

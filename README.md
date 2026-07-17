@@ -77,6 +77,18 @@ since you last looked, dimmed = its machine is offline.
 - **File columns.** In landscape, each session gets explorer + file viewer
   columns rooted at its cwd (relayed tower→daemon), with a monaco editor and
   unsaved-edit drafts. Small images preview inline (base64 through the relay).
+- **Context checkboxes** (in the flight plan; all live-verified on claude
+  2.1.207 — any change = cold cache next run):
+  - **CLAUDE.md** (default OFF): adds the `project` setting source
+    (`--setting-sources user,project`), which loads the cwd's CLAUDE.md — and
+    with it project-level skills/settings/hooks (they ride together; there is
+    no finer switch).
+  - **memory** (default ON): the auto-memory feature (MEMORY.md under
+    `~/.claude/projects/<cwd>/memory/`). Off = spawn with
+    `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. (Beware `--bare` and
+    `CLAUDE_CODE_SIMPLE=1`: they also disable it but break subscription oauth.)
+  - **skills** (default ON): off = `--disable-slash-commands`, which unlists
+    ALL skills (user and project level).
 
 ## Quickstart (single machine, no auth)
 

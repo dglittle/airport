@@ -184,16 +184,24 @@ function run(cmd, attempt = 0) {
   }
   const sid = resumeSid || uuid();
 
+  // context checkboxes (all live-verified on claude 2.1.207):
+  //   useClaudeMd → the "project" setting source carries cwd CLAUDE.md
+  //     (plus project skills/settings — they ride together)
+  //   useSkills   → --disable-slash-commands kills ALL skills
+  //   useMemory   → CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 (the env var; --bare and
+  //     CLAUDE_CODE_SIMPLE=1 also work but break subscription oauth — unusable)
   const args = ["-p", cmd.prompt, "--output-format", "stream-json", "--verbose",
-    "--model", model, "--setting-sources", "user",
+    "--model", model, "--setting-sources", cmd.meta.useClaudeMd ? "user,project" : "user",
     "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--allowedTools", cmd.meta.tools || DEFAULT_TOOLS, "--permission-mode", "dontAsk"];
+  if (cmd.meta.useSkills === false) args.push("--disable-slash-commands");
   if (cmd.meta.systemPrompt) // part of the cache prefix — byte-stable across runs
     args.push(cmd.meta.systemMode === "replace" ? "--system-prompt" : "--append-system-prompt", cmd.meta.systemPrompt);
   args.push(resumeSid ? "--resume" : "--session-id", sid);
 
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY; // subscription runs only — never bill cash by accident
+  if (cmd.meta.useMemory === false) env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   const tok = TOKENS[tokenIdx] || null;
   if (tok) env.CLAUDE_CODE_OAUTH_TOKEN = tok;
 
