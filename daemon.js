@@ -59,8 +59,10 @@ const MAX_CONCURRENT_TURNS = Number(process.env.AIRPORT_MAX_TURNS || 2);
 
 const expandHome = (p) => (p && p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
 const SESS_ROOT = expandHome(process.env.AIRPORT_SESS_ROOT || "~/airport-sessions");
+// AIRPORT_ROOTS=/ whitelists the whole filesystem (the whitelist machinery stays)
 const WHITELIST = [SESS_ROOT].concat(
-  (process.env.AIRPORT_ROOTS || "").split(":").filter(Boolean).map(expandHome));
+  (process.env.AIRPORT_ROOTS || "").split(":").filter(Boolean).map(expandHome)
+    .map((r) => (r.length > 1 ? r.replace(/\/+$/, "") : r)));
 
 // subscription tokens (up to two accounts; sticky failover)
 const TOKENS = [];
@@ -88,7 +90,7 @@ function log(msg) {
 const uuid = () => require("crypto").randomUUID();
 const encodeCwd = (p) => p.replace(/[\/._]/g, "-");
 function inWhitelist(abs) {
-  return WHITELIST.some((root) => abs === root || abs.startsWith(root + path.sep));
+  return WHITELIST.some((root) => root === path.sep || abs === root || abs.startsWith(root + path.sep));
 }
 
 // ---------- transcript synthesis (see SYNTHETIC.md — CC-internal format) ----------
