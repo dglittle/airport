@@ -1,0 +1,18 @@
+# airport ground crew as a systemd unit (any linux machine, incl. the box itself).
+#   sudo cp deploy/airport-daemon.service /etc/systemd/system/
+#   sudo systemctl enable --now airport-daemon
+# Config lives in ~/.airport/.env (AIRPORT_SERVER, AIRPORT_PASS, AIRPORT_HOST_NAME, …).
+[Unit]
+Description=airport ground crew (claude turn runner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bitnami
+WorkingDirectory=/home/bitnami/airport
+ExecStart=/usr/bin/env node daemon.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

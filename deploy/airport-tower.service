@@ -1,0 +1,18 @@
+# airport tower as a systemd unit (the always-on box).
+#   sudo cp deploy/airport-tower.service /etc/systemd/system/
+#   sudo systemctl enable --now airport-tower
+# Config lives in ~/.airport/.env (AIRPORT_PASS, AIRPORT_TLS_CERT/_KEY, …).
+[Unit]
+Description=airport tower (claude session hub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bitnami
+WorkingDirectory=/home/bitnami/airport
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

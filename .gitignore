@@ -1,0 +1,5 @@
+node_modules/
+airport-data.json
+*.log
+.env
+.DS_Store

@@ -1,0 +1,13 @@
+{
+  "name": "airport",
+  "version": "1.0.0",
+  "description": "every claude session, one airfield — sessions as editable message histories + params, run on any machine",
+  "private": true,
+  "scripts": {
+    "server": "node server.js",
+    "daemon": "node daemon.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

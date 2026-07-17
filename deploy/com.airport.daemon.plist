@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- airport ground crew as a Mac LaunchAgent.
+     Fix the two /Users/YOU paths, then:
+       cp deploy/com.airport.daemon.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.airport.daemon.plist
+     Config lives in ~/.airport/.env (AIRPORT_SERVER, AIRPORT_PASS, …). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.airport.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/YOU/airport/daemon.js</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/.airport/daemon.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.airport/daemon.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
