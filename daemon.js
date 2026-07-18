@@ -259,6 +259,7 @@ function run(cmd, attempt = 0) {
         LIMIT_RE.test(String(finalResult?.result || "") + " " + stderr)) {
       tokenIdx = (tokenIdx + 1) % TOKENS.length;
       saveTokenIdx();
+      towerSend({ type: "update", patch: { hosts: { [HOST_NAME]: { activeToken: tokenIdx + 1 } } } });
       log(`(${id}) allowance/auth failure — switching to token #${tokenIdx + 1}, retrying`);
       addBox(id, "tool", "(account allowance hit — switching accounts and retrying)", { synced: true, sys: true });
       // retry resumes the SAME sid — the failed turn added nothing worth keeping
@@ -368,7 +369,7 @@ function connect() {
     towerSend({ type: "auth", role: "host", host: HOST_NAME, pass: PASS,
       info: { platform: os.platform(), sessRoot: SESS_ROOT, roots: WHITELIST,
               defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length,
-              maxTurns: MAX_CONCURRENT_TURNS } });
+              maxTurns: MAX_CONCURRENT_TURNS, activeToken: TOKENS.length ? tokenIdx + 1 : 0 } });
     log("tower connected");
   });
   ws.addEventListener("message", (e) => {

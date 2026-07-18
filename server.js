@@ -254,6 +254,47 @@ fs.watchFile(HTML, { interval: 2000 }, () => {
   if (v && v !== HTML_VER) { HTML_VER = v; apply({ pageVersion: v }); }
 });
 
+// ---------- account allowance (rate-limit headers on a 1-token probe) ----------
+// The setup-token oauth scope can't read /api/oauth/usage, but every inference
+// response carries anthropic-ratelimit-unified-* headers — so a minimal haiku
+// call per account IS the usage query. Polled gently; doc.usage feeds the UI.
+const USAGE_TOKENS = [];
+for (const k of ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_2"])
+  if (process.env[k]) USAGE_TOKENS.push(process.env[k]);
+let lastUsageFetch = 0;
+function fetchUsage(force) {
+  if (!USAGE_TOKENS.length) return;
+  if (!force && Date.now() - lastUsageFetch < 60_000) return; // throttle post-turn refreshes
+  lastUsageFetch = Date.now();
+  USAGE_TOKENS.forEach((tok, i) => {
+    const req = https.request({
+      hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", timeout: 15000,
+      headers: { Authorization: "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    }, (res) => {
+      res.resume();
+      const h = res.headers;
+      const num = (x) => (x == null ? null : Number(x));
+      const entry = h["anthropic-ratelimit-unified-5h-utilization"] != null ? {
+        five: num(h["anthropic-ratelimit-unified-5h-utilization"]),
+        fiveReset: (num(h["anthropic-ratelimit-unified-5h-reset"]) || 0) * 1000 || null,
+        seven: num(h["anthropic-ratelimit-unified-7d-utilization"]),
+        sevenReset: (num(h["anthropic-ratelimit-unified-7d-reset"]) || 0) * 1000 || null,
+        status: String(h["anthropic-ratelimit-unified-status"] || ""),
+        at: Date.now(), err: null,
+      } : { at: Date.now(), err: "no usage headers (http " + res.statusCode + ")" };
+      apply({ usage: { [String(i + 1)]: entry } });
+    });
+    req.on("error", (e) => apply({ usage: { [String(i + 1)]: { at: Date.now(), err: e.message } } }));
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.end(JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1,
+      system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+      messages: [{ role: "user", content: "hi" }] }));
+  });
+}
+setInterval(() => fetchUsage(false), 10 * 60 * 1000);
+setTimeout(() => fetchUsage(true), 3000);
+
 // ---------- whisper (OpenAI) ----------
 function openaiKey() {
   return process.env.OPENAI_API_KEY || null; // env or ~/.airport/.env (loaded above)
@@ -461,6 +502,7 @@ wss.on("connection", (ws) => {
       }
       patch.lastError = m.failed ? String(m.error || "failed") : null;
       apply({ sessions: { [m.session]: patch } });
+      fetchUsage(false); // refresh the allowance gauge after a turn (throttled)
       return;
     }
     if (m.type === "interrupt" && ws._role === "browser" && typeof m.session === "string") {

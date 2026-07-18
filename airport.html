@@ -86,6 +86,16 @@
     display:flex; align-items:center; justify-content:center; padding:0;
   }
   .emptytarmac{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; pointer-events:none; }
+  /* allowance gauge — chrome, not part of the apron's spatial layout */
+  #gauge{
+    position:absolute; top:6px; left:10px; z-index:5; pointer-events:none;
+    font:10px/1.7 ui-monospace,Menlo,monospace; color:var(--dim);
+    text-shadow:0 1px 3px rgba(0,0,0,.8);
+  }
+  #gauge .acct{ white-space:nowrap; }
+  #gauge .ok{ color:var(--hot); } #gauge .warn{ color:var(--run); } #gauge .bad{ color:var(--bad); }
+  #gauge .lbl{ color:var(--muted); }
+  #gauge .stale{ opacity:.5; }
 
   /* ---------- 3-column session view (explorer | file | claude) ---------- */
   #cols{ flex:1 1 auto; min-height:0; display:none; }
@@ -313,7 +323,7 @@
     <button id="gear">⚙</button>
   </header>
 
-  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
+  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div id="gauge"></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
   <div id="cols">
     <div id="explorer"></div>
@@ -556,6 +566,34 @@ function render(){
   view ? renderSession() : renderTarmac();
 }
 
+// ---------- allowance gauge (per subscription account; tower polls the headers) ----------
+const CIRC = ["", "①", "②", "③"];
+function untilTxt(ms){
+  if (!ms) return "";
+  const s = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+  if (s < 3600) return Math.ceil(s / 60) + "m";
+  return Math.floor(s / 3600) + "h" + Math.round((s % 3600) / 60) + "m";
+}
+function sevCls(x){ return x >= 0.85 ? "bad" : x >= 0.6 ? "warn" : "ok"; }
+function gaugeBar(x){ const n = Math.max(0, Math.min(8, Math.round((x || 0) * 8))); return "▮".repeat(n) + "▯".repeat(8 - n); }
+function renderGauge(){
+  const g = $("gauge");
+  const u = (doc[0] && doc[0].usage) || {};
+  const keys = Object.keys(u).sort();
+  if (!keys.length) { g.innerHTML = ""; return; }
+  const lines = keys.map((k) => {
+    const a = u[k] || {};
+    if (a.err) return `<div class="acct stale">${CIRC[+k] || k} <span class="bad">✗</span> <span class="lbl">${esc(a.err)}</span></div>`;
+    const stale = !a.at || Date.now() - a.at > 25 * 60_000;
+    return `<div class="acct${stale ? " stale" : ""}">${CIRC[+k] || k} <span class="${sevCls(a.five)}">${gaugeBar(a.five)} ${Math.round((a.five || 0) * 100)}%</span> <span class="lbl">↻${untilTxt(a.fiveReset)}</span> · <span class="${sevCls(a.seven)}">7d ${Math.round((a.seven || 0) * 100)}%</span></div>`;
+  });
+  // which account each airfield is flying on (daemon-reported, flips on failover)
+  const flying = Object.entries(hosts()).filter(([, h]) => h && h.activeToken)
+    .map(([n, h]) => `${esc(n)}→${CIRC[h.activeToken] || h.activeToken}`).join(" · ");
+  if (flying) lines.push(`<div class="acct"><span class="lbl">${flying}</span></div>`);
+  g.innerHTML = lines.join("");
+}
+
 // ---------- the tarmac (the square apron; everything scales with --S) ----------
 let dragState = null;
 const DISC = 0.125;            // disc side as a fraction of the apron side
@@ -578,6 +616,7 @@ function renderTarmac(){
   apron.style.left = ((W - S) / 2) + "px";
   apron.style.top = ((H - S) / 2) + "px";
   apron.style.setProperty("--S", S + "px");
+  renderGauge();
   const ss = sessions();
   const ids = Object.keys(ss);
   $("emptytarmac").style.display = ids.length ? "none" : "flex";
