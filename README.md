@@ -89,6 +89,12 @@ since you last looked, dimmed = its machine is offline.
     `CLAUDE_CODE_SIMPLE=1`: they also disable it but break subscription oauth.)
   - **skills** (default ON): off = `--disable-slash-commands`, which unlists
     ALL skills (user and project level).
+- **🧭 briefing button** (composer): stows a stock user box that tells the
+  session's Claude how airport drives it — turn mechanics, box mirror/rebuild
+  rules, rendering, file delivery — templated with that plane's live setup
+  (cwd, machine, model, context toggles). Like a skill, but it works even when
+  the session runs with skills/CLAUDE.md off, and there's nothing to copy into
+  each cwd. It's a pending box: stack your actual ask on top, then ⚡.
 
 ## Quickstart (single machine, no auth)
 

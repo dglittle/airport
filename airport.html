@@ -287,6 +287,7 @@
     color:var(--ink); font:600 12px -apple-system,sans-serif; padding:10px 6px;
   }
   #dictate,#whisper{ flex:1; }
+  #brief{ flex:.45; }
   #addbox{ flex:.8; }
   #dictate.on{ border-color:var(--run); background:linear-gradient(180deg,#3a2d10 0%,#241a08 100%); color:var(--run); }
   #whisper.on{ border-color:var(--bad); background:linear-gradient(180deg,#4a1a14 0%,#2a0e0a 100%); color:#ff9c8a; }
@@ -322,6 +323,7 @@
     <div class="controls">
       <button id="dictate">📱 dictate</button>
       <button id="whisper">☁︎ whisper</button>
+      <button id="brief" title="add a box that briefs claude on how airport works">🧭</button>
       <button id="addbox">＋ box</button>
       <button id="runbtn">⚡ run</button>
     </div>
@@ -1050,6 +1052,32 @@ function delBoxes(keys){
   if (anySynced) p.dirty = true;
   patch({ sessions: { [view]: p } });
 }
+
+// ---------- the 🧭 briefing: a stock box that tells claude how airport works ----------
+// Like a skill, but usable even when the session runs with skills/CLAUDE.md off,
+// and with no files to copy into every cwd. Templated with THIS plane's setup.
+function briefingText(id, s){
+  const onoff = (v) => v ? "ON" : "OFF";
+  return [
+"✈ AIRPORT BRIEFING — how this session is being driven (context, not a task)",
+"",
+"You are session \"" + id + "\" in airport, Greg's claude-session manager (github.com/dglittle/airport).",
+"",
+"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". Turn timeout: 10 minutes — for long work, save progress to files as you go.",
+"- Your setup right now: cwd " + (s.cwd || "?") + " · model " + (s.model || "claude-fable-5") + " · context loading: CLAUDE.md " + onoff(!!s.useClaudeMd) + ", auto-memory " + onoff(s.useMemory !== false) + ", skills " + onoff(s.useSkills !== false) + ". Greg can change all of this (plus your system prompt, allowed tools, and even which machine you run on) from the UI.",
+"- The conversation you see is mirrored as editable \"boxes\" in the UI. Greg may edit or delete past boxes; after such an edit — or after moving you to another machine — your next turn runs on a transcript REBUILT from the visible text only: thinking and tool outputs are dropped. Under normal use your real transcript (tool results included) stays intact.",
+"- One prompt may be several user boxes stacked together — treat them as one message in order.",
+"- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. Greg is often on his phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
+"- The UI has a file explorer + editor rooted at your cwd — writing files there is the best way to deliver artifacts (.html renders, .md renders, small images preview).",
+"",
+"If this briefing arrives alongside other messages, just act on those — no need to comment on the briefing itself.",
+  ].join("\n");
+}
+$("brief").addEventListener("click", () => {
+  if (!view) return;
+  send({ type: "addbox", session: view, text: briefingText(view, sess(view)) });
+  hint("🧭 briefing boxed (pending) — stack your ask, then ⚡");
+});
 
 // ---------- add box / run / interrupt ----------
 $("addbox").addEventListener("click", () => {
