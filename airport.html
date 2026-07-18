@@ -487,7 +487,9 @@ function ago(ts){
   if (s < 60) return s+"s"; if (s < 3600) return Math.floor(s/60)+"m";
   if (s < 86400) return Math.floor(s/3600)+"h"; return Math.floor(s/86400)+"d";
 }
-function isHot(s){ return s.lastRunEndedAt && s.hotUntil && Date.now() < s.hotUntil; }
+function isHot(s){ return !!(s.lastRunEndedAt && s.hotUntil && Date.now() < s.hotUntil); }
+// ^ MUST return a real boolean: classList.toggle(cls, undefined) is a FLIP, not "off" —
+// undefined leaked here and made never-flown planes blink green on render parity (7/18)
 function isUnread(s){ return !s.running && s.lastRunEndedAt && s.lastRunEndedAt > (s.seenAt || 0); }
 function hint(t){ $("hintline").textContent = t || ""; }
 const PLANES = ["🛩","✈️","🛫","🛬","🚁","🛸","🚀","🎈"];
