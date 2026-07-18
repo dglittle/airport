@@ -50,30 +50,35 @@
   #tarmac{ flex:1 1 auto; position:relative; overflow:hidden; touch-action:none; display:none; }
   #tarmac.on{ display:block; }
   #apron{ position:absolute; border:calc(var(--S,300px)*0.006) dashed var(--rule); border-radius:calc(var(--S,300px)*0.035); }
+  /* self-contained tile: emoji + name + meta all INSIDE the ⅛-side square */
   .plane{
-    position:absolute; width:calc(var(--S)*0.22); transform:translateX(-50%); text-align:center; cursor:pointer;
+    position:absolute; width:calc(var(--S)*0.125); height:calc(var(--S)*0.125);
+    transform:translate(-50%,-50%);
+    background:var(--panel); border:calc(var(--S)*0.005) solid var(--rule); border-radius:18%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:calc(var(--S)*0.003); padding:calc(var(--S)*0.006);
+    text-align:center; cursor:pointer;
     -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent;
+    transition:border-color .2s, box-shadow .2s;
   }
-  .plane .disc{
-    width:calc(var(--S)*0.125); height:calc(var(--S)*0.125); margin:0 auto; border-radius:24%;
-    background:var(--panel); border:calc(var(--S)*0.005) solid var(--rule);
-    display:flex; align-items:center; justify-content:center; font-size:calc(var(--S)*0.062);
-    position:relative; transition:border-color .2s, box-shadow .2s;
-  }
-  .plane.hot .disc{ border-color:var(--hot); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
-  .plane.running .disc{ border-color:var(--run); box-shadow:0 0 calc(var(--S)*0.035) rgba(255,196,107,.45); animation:pulse 1.1s infinite; }
+  .plane.hot{ border-color:var(--hot); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
+  .plane.running{ border-color:var(--run); box-shadow:0 0 calc(var(--S)*0.035) rgba(255,196,107,.45); animation:pulse 1.1s infinite; }
   .plane.offline{ opacity:.45; }
-  .plane.dragging .disc{ box-shadow:0 calc(var(--S)*0.015) calc(var(--S)*0.05) rgba(0,0,0,.6); }
+  .plane.dragging{ box-shadow:0 calc(var(--S)*0.015) calc(var(--S)*0.05) rgba(0,0,0,.6); }
   .plane .unread{
     position:absolute; top:calc(var(--S)*-0.012); right:calc(var(--S)*-0.012);
     width:calc(var(--S)*0.03); height:calc(var(--S)*0.03); border-radius:50%;
     background:var(--new); border:calc(var(--S)*0.005) solid var(--bg); box-shadow:0 0 calc(var(--S)*0.025) rgba(183,140,255,.7);
   }
+  .plane .emoji{ font-size:calc(var(--S)*0.038); line-height:1.15; }
   .plane .name{
-    margin-top:calc(var(--S)*0.008); font-size:calc(var(--S)*0.024); font-weight:600; color:var(--ink);
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-size:calc(var(--S)*0.0165); font-weight:600; color:var(--ink); line-height:1.2;
+    max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .plane .meta{ font-size:calc(var(--S)*0.018); color:var(--dim); font-family:ui-monospace,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .plane .meta{
+    font-size:calc(var(--S)*0.0115); color:var(--dim); font-family:ui-monospace,Menlo,monospace; line-height:1.2;
+    max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
   .plane .meta .hostm{ color:var(--muted); }
   .plane .meta .hostm.off{ color:var(--bad); }
   .plane .meta .hotm{ color:var(--hot); }
@@ -647,26 +652,28 @@ function renderTarmac(){
     el.classList.toggle("running", !!s.running);
     el.classList.toggle("hot", !s.running && isHot(s));
     el.classList.toggle("offline", s.state === "offline");
+    el.title = s.title || id;
     if (dragState?.id !== id) {
       const x = clampX(typeof s.x === "number" ? s.x : 0.5);
       const y = clampY(typeof s.y === "number" ? s.y : 0.5);
-      el.style.left = (x * S) + "px";                 // disc CENTER x (translateX(-50%))
-      el.style.top = ((y - DISC / 2) * S) + "px";     // disc center y
+      el.style.left = (x * S) + "px";   // tile center (translate(-50%,-50%))
+      el.style.top = (y * S) + "px";
       const off = !hostUp(s.host);
       const meta = s.running
         ? `<span class="runm">flying·${ago(s.startedAt)}</span>`
         : isHot(s) ? `<span class="hotm">hot·${ago(s.lastRunEndedAt)}</span>`
         : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
       el.innerHTML = `
-        <div class="disc">${esc(emojiFor(id, s))}${isUnread(s) ? '<div class="unread"></div>' : ""}</div>
+        ${isUnread(s) ? '<div class="unread"></div>' : ""}
+        <div class="emoji">${esc(emojiFor(id, s))}</div>
         <div class="name">${esc(s.title || id)}</div>
-        <div class="meta"><span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span> · ${fmtTok(s.totalTokens)} · ${meta}</div>`;
+        <div class="meta"><span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>·${fmtTok(s.totalTokens)}·${meta}</div>`;
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
 }
 function clampX(x){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, x)); }
-function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.055, y)); } // room for the name below
+function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, y)); }
 function wirePlane(el){
   el.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -682,7 +689,7 @@ function wirePlane(el){
     el.classList.add("dragging");
     const S = $("apron").clientWidth;
     el.style.left = (clampX((dragState.ox + dx) / S) * S) + "px";
-    el.style.top = ((clampY((dragState.oy + dy) / S + DISC / 2) - DISC / 2) * S) + "px";
+    el.style.top = (clampY((dragState.oy + dy) / S) * S) + "px";
   });
   el.addEventListener("pointerup", () => {
     if (!dragState || dragState.el !== el) return;
@@ -692,7 +699,7 @@ function wirePlane(el){
       const S = $("apron").clientWidth;
       patch({ sessions: { [d.id]: {
         x: clampX(parseFloat(el.style.left) / S),
-        y: clampY(parseFloat(el.style.top) / S + DISC / 2) } } });
+        y: clampY(parseFloat(el.style.top) / S) } } });
     } else openSession(d.id);
   });
   el.addEventListener("pointercancel", () => { if (dragState?.el === el) { el.classList.remove("dragging"); dragState = null; } });
