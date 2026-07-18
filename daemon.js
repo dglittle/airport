@@ -353,13 +353,19 @@ function fsOp(cmd) {
 }
 
 // ---------- tower connection (dial out + watchdog) ----------
-let towerWs = null, pendingWs = null, connecting = false, lastAttempt = 0;
+let towerWs = null, pendingWs = null, connecting = false, lastAttempt = 0, reconnectTimer = null;
 function towerSend(obj) {
   if (!towerWs || towerWs.readyState !== 1) return;
   try { towerWs.send(JSON.stringify(obj)); } catch (_) {}
 }
+function scheduleConnect(ms) { // single pending redial — parallel timers seed flap loops
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, ms);
+}
 function connect() {
   if (connecting) return;
+  if (towerWs && towerWs.readyState === 1) return; // already up — a second dial makes the
+  // tower supersede-close the live socket, whose close handler redials: a forever flap
   connecting = true; lastAttempt = Date.now();
   let ws;
   try { ws = new WebSocket(SERVER); } catch (_) { connecting = false; return; }
@@ -384,7 +390,8 @@ function connect() {
   ws.addEventListener("close", () => {
     connecting = false;
     if (towerWs === ws) towerWs = null;
-    setTimeout(connect, 5000);
+    if (towerWs && towerWs.readyState === 1) return; // a superseded/stale socket died — the live one stands
+    scheduleConnect(5000);
   });
   ws.addEventListener("error", (e) => { log(`ws error: ${(e && (e.message || (e.error && e.error.message))) || "unknown"}`); });
   const p = setInterval(() => {
