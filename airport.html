@@ -35,7 +35,8 @@
     border-radius:8px; padding:4px 10px; font-size:13px; cursor:pointer; flex:0 0 auto;
     -webkit-tap-highlight-color:transparent;
   }
-  header .stat{ margin-left:auto; font-size:10px; color:var(--muted); font-family:ui-monospace,Menlo,monospace; display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+  header .stat{ font-size:10px; color:var(--muted); font-family:ui-monospace,Menlo,monospace; display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+  header #gauge:empty + .stat{ margin-left:auto; }
   header .stat .dot{ width:7px; height:7px; border-radius:50%; background:var(--dim); }
   header .stat.ok .dot{ background:var(--hot); }
   header .stat.warn .dot{ background:var(--run); animation:pulse 1.1s infinite; }
@@ -86,12 +87,12 @@
     display:flex; align-items:center; justify-content:center; padding:0;
   }
   .emptytarmac{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; pointer-events:none; }
-  /* allowance gauge — chrome, not part of the apron's spatial layout */
+  /* allowance gauge — lives in the header bar, one span per account */
   #gauge{
-    position:absolute; top:6px; left:10px; z-index:5; pointer-events:none;
-    font:10px/1.7 ui-monospace,Menlo,monospace; color:var(--dim);
-    text-shadow:0 1px 3px rgba(0,0,0,.8);
+    margin-left:auto; display:flex; gap:9px; align-items:center; flex:0 0 auto;
+    font:9.5px ui-monospace,Menlo,monospace; color:var(--dim);
   }
+  #gauge:empty{ display:none; }
   #gauge .acct{ white-space:nowrap; }
   #gauge .ok{ color:var(--hot); } #gauge .warn{ color:var(--run); } #gauge .bad{ color:var(--bad); }
   #gauge .lbl{ color:var(--muted); }
@@ -318,12 +319,13 @@
     <button id="back" style="display:none">‹</button>
     <b id="hdr-title">✈ airport</b>
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
+    <span id="gauge"></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span></span>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
     <button id="gear">⚙</button>
   </header>
 
-  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div id="gauge"></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
+  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
   <div id="cols">
     <div id="explorer"></div>
@@ -524,7 +526,7 @@ function connect(){
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
 }
 setInterval(() => send({ type: "ping" }), 30000);
-setInterval(() => { if (doc[0] && !view) renderTarmac(); }, 30000); // ago refresh
+setInterval(() => { if (!doc[0]) return; renderGauge(); if (!view) renderTarmac(); }, 30000); // ago/gauge refresh
 
 // page self-reload: the shelf carries pageVersion = hash of airport.html on the
 // tower's disk; when it stops matching the stamp in THIS page, pull the new one.
@@ -563,6 +565,7 @@ function closeSession(){
 
 function render(){
   if (view && !sessions()[view]) view = null; // deleted under us
+  renderGauge();
   view ? renderSession() : renderTarmac();
 }
 
@@ -580,18 +583,18 @@ function renderGauge(){
   const g = $("gauge");
   const u = (doc[0] && doc[0].usage) || {};
   const keys = Object.keys(u).sort();
-  if (!keys.length) { g.innerHTML = ""; return; }
-  const lines = keys.map((k) => {
+  if (!keys.length) { g.innerHTML = ""; g.title = ""; return; }
+  const spans = [], tips = [];
+  for (const k of keys) {
     const a = u[k] || {};
-    if (a.err) return `<div class="acct stale">${CIRC[+k] || k} <span class="bad">✗</span> <span class="lbl">${esc(a.err)}</span></div>`;
+    const tag = CIRC[+k] || k;
+    if (a.err) { spans.push(`<span class="acct stale">${tag}<span class="bad">✗</span></span>`); tips.push(`${tag} ${a.err}`); continue; }
     const stale = !a.at || Date.now() - a.at > 25 * 60_000;
-    return `<div class="acct${stale ? " stale" : ""}">${CIRC[+k] || k} <span class="${sevCls(a.five)}">${gaugeBar(a.five)} ${Math.round((a.five || 0) * 100)}%</span> <span class="lbl">↻${untilTxt(a.fiveReset)}</span> · <span class="${sevCls(a.seven)}">7d ${Math.round((a.seven || 0) * 100)}%</span></div>`;
-  });
-  // which account each airfield is flying on (daemon-reported, flips on failover)
-  const flying = Object.entries(hosts()).filter(([, h]) => h && h.activeToken)
-    .map(([n, h]) => `${esc(n)}→${CIRC[h.activeToken] || h.activeToken}`).join(" · ");
-  if (flying) lines.push(`<div class="acct"><span class="lbl">${flying}</span></div>`);
-  g.innerHTML = lines.join("");
+    spans.push(`<span class="acct${stale ? " stale" : ""}">${tag}<span class="${sevCls(a.five)}">${gaugeBar(a.five)}${Math.round((a.five || 0) * 100)}%</span>${a.seven >= 0.5 ? ` <span class="${sevCls(a.seven)}">7d${Math.round(a.seven * 100)}%</span>` : ""}</span>`);
+    tips.push(`${tag} 5h ${Math.round((a.five || 0) * 100)}% (resets ${untilTxt(a.fiveReset)}) · 7d ${Math.round((a.seven || 0) * 100)}% (resets ${untilTxt(a.sevenReset)})`);
+  }
+  g.innerHTML = spans.join("");
+  g.title = tips.join("\n");
 }
 
 // ---------- the tarmac (the square apron; everything scales with --S) ----------
@@ -616,7 +619,6 @@ function renderTarmac(){
   apron.style.left = ((W - S) / 2) + "px";
   apron.style.top = ((H - S) / 2) + "px";
   apron.style.setProperty("--S", S + "px");
-  renderGauge();
   const ss = sessions();
   const ids = Object.keys(ss);
   $("emptytarmac").style.display = ids.length ? "none" : "flex";

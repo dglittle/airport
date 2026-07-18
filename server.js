@@ -535,9 +535,12 @@ wss.on("connection", (ws) => {
     log(`- ${ws._role || "?"}${ws._host ? ":" + ws._host : ""} peer=${peerId} (${clients.size} clients)`);
     if (ws._role === "host" && ws._host && !hostSocket(ws._host)) {
       const patch = { hosts: { [ws._host]: { online: false, lastSeen: Date.now() } }, sessions: {} };
-      for (const [id, s] of Object.entries(doc[0].sessions || {}))
-        if (s && s.host === ws._host && s.state !== "offline")
-          patch.sessions[id] = { state: "offline", running: false };
+      for (const [id, s] of Object.entries(doc[0].sessions || {})) {
+        if (!s || s.host !== ws._host || s.state === "offline") continue;
+        if (s.running) // make the kill VISIBLE — a silent mid-turn death looks like a finished turn
+          addBox(id, "tool", "✗ ground crew went offline mid-turn — this run was lost (work already on disk is kept; ⚡ to continue)", { synced: true, err: true });
+        patch.sessions[id] = { state: "offline", running: false };
+      }
       apply(patch);
       log(`ground crew '${ws._host}' gone — its sessions offline`);
     }
