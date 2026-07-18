@@ -350,7 +350,7 @@ function fsOp(cmd) {
 }
 
 // ---------- tower connection (dial out + watchdog) ----------
-let towerWs = null, connecting = false, lastAttempt = 0;
+let towerWs = null, pendingWs = null, connecting = false, lastAttempt = 0;
 function towerSend(obj) {
   if (!towerWs || towerWs.readyState !== 1) return;
   try { towerWs.send(JSON.stringify(obj)); } catch (_) {}
@@ -360,6 +360,7 @@ function connect() {
   connecting = true; lastAttempt = Date.now();
   let ws;
   try { ws = new WebSocket(SERVER); } catch (_) { connecting = false; return; }
+  pendingWs = ws;
   ws.addEventListener("open", () => {
     connecting = false; towerWs = ws;
     towerSend({ type: "auth", role: "host", host: HOST_NAME, pass: PASS,
@@ -394,7 +395,17 @@ log(`cwd whitelist: ${WHITELIST.join(" · ")} (others remap to ${SESS_ROOT}/<id>
 connect();
 setInterval(() => {
   const up = towerWs && towerWs.readyState === 1;
-  if (!up && !connecting && Date.now() - lastAttempt > 15000) { log("watchdog: redialing tower"); connect(); }
+  if (up) return;
+  if (!connecting && Date.now() - lastAttempt > 15000) { log("watchdog: redialing tower"); connect(); return; }
+  // a connect attempt can wedge without EVER firing close (seen on the mac
+  // after sleep/dark-wake: "error" fires, "close" never does, `connecting`
+  // sticks true and locks out every retry path) — force-reset stale attempts
+  if (connecting && Date.now() - lastAttempt > 60000) {
+    log("watchdog: connect attempt wedged — force reset");
+    connecting = false;
+    try { if (pendingWs) pendingWs.close(); } catch (_) {}
+    connect();
+  }
 }, 30000);
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
