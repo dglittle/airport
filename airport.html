@@ -233,9 +233,10 @@
     min-height:70px; resize:vertical;
   }
   .confirmrow{ display:flex; gap:6px; margin-top:6px; }
-  .thinking{ display:flex; gap:5px; padding:10px 4px; }
+  .thinking{ display:flex; gap:5px; padding:10px 4px; align-items:center; }
   .thinking span{ width:7px; height:7px; border-radius:50%; background:var(--run); animation:pulse 1s infinite; }
   .thinking span:nth-child(2){ animation-delay:.2s } .thinking span:nth-child(3){ animation-delay:.4s }
+  .thinking .flytime{ font:10px ui-monospace,Menlo,monospace; font-style:normal; color:var(--run); margin-left:6px; }
   .emptyfeed{ color:var(--dim); text-align:center; padding:50px 0; }
 
   /* ---------- inline session settings (top of feed) ---------- */
@@ -493,6 +494,12 @@ function ago(ts){
   if (s < 86400) return Math.floor(s/3600)+"h"; return Math.floor(s/86400)+"d";
 }
 function isHot(s){ return !!(s.lastRunEndedAt && s.hotUntil && Date.now() < s.hotUntil); }
+function fmtFly(ms){
+  const t = Math.max(0, Math.floor(ms / 1000));
+  if (t < 60) return t + "s";
+  if (t < 3600) return Math.floor(t / 60) + "m" + String(t % 60).padStart(2, "0") + "s";
+  return Math.floor(t / 3600) + "h" + Math.round((t % 3600) / 60) + "m";
+}
 // ^ MUST return a real boolean: classList.toggle(cls, undefined) is a FLIP, not "off" —
 // undefined leaked here and made never-flown planes blink green on render parity (7/18)
 function isUnread(s){ return !s.running && s.lastRunEndedAt && s.lastRunEndedAt > (s.seenAt || 0); }
@@ -541,6 +548,18 @@ function connect(){
 }
 setInterval(() => send({ type: "ping" }), 30000);
 setInterval(() => { if (!doc[0]) return; renderGauge(); if (!view) renderTarmac(); }, 30000); // ago/gauge refresh
+// flight clock: tick every second while anything is flying
+setInterval(() => {
+  if (!doc[0]) return;
+  const anyFly = Object.values(sessions()).some((s) => s && s.running);
+  if (!anyFly) return;
+  if (!view) { renderTarmac(); return; }
+  const s = sess(view);
+  if (!s.running) return;
+  const ft = feedEl.querySelector(".flytime");
+  if (ft) ft.textContent = "✈ " + fmtFly(Date.now() - (s.startedAt || Date.now()));
+  $("stat-txt").textContent = "flying " + fmtFly(Date.now() - (s.startedAt || Date.now()));
+}, 1000);
 
 // page self-reload: the shelf carries pageVersion = hash of airport.html on the
 // tower's disk; when it stops matching the stamp in THIS page, pull the new one.
@@ -663,7 +682,7 @@ function renderTarmac(){
       el.style.top = (y * S) + "px";
       const off = !hostUp(s.host);
       const meta = s.running
-        ? `<span class="runm">flying·${ago(s.startedAt)}</span>`
+        ? `<span class="runm">✈${fmtFly(Date.now() - (s.startedAt || Date.now()))}</span>`
         : isHot(s) ? `<span class="hotm">hot·${ago(s.lastRunEndedAt)}</span>`
         : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
       el.innerHTML = `
@@ -1075,7 +1094,7 @@ function renderSession(){
   const msgs = ensureCfg();  // settings panel rides at the top of the same scroll
   syncCfg();                 // pull remote changes into non-focused fields
   msgs.innerHTML = (boxes.length ? boxes.map((b, i) => turnHtml(b, i, boxes.length)).join("") : `<div class="emptyfeed">empty hold — add a box below</div>`)
-    + (s.running ? `<div class="thinking"><span></span><span></span><span></span></div>` : "");
+    + (s.running ? `<div class="thinking"><span></span><span></span><span></span><i class="flytime">✈ ${fmtFly(Date.now() - (s.startedAt || Date.now()))}</i></div>` : "");
   if (nearBottom) feedEl.scrollTop = feedEl.scrollHeight;
 
   feedEl.querySelectorAll(".htmlframe").forEach(f => {
@@ -1150,6 +1169,8 @@ function briefingText(id, s){
 "- One prompt may be several user boxes stacked together — treat them as one message in order.",
 "- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. Greg is often on his phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
 "- The UI has a file explorer + editor rooted at your cwd — writing files there is the best way to deliver artifacts (.html renders, .md renders, small images preview).",
+"- FORKING (branching a session): Greg uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus dirty:true, state:\"ready\", and x/y (0..1 fractions, its spot on the tarmac). dirty:true means the fork rebuilds its transcript from the text mirror on first ⚡ — visible conversation only, cold cache.",
+"- Fork WITH full context (keeps tool results + thinking): instead of dirty:true, copy your transcript file ~/.claude/projects/<cwd with [/._] mapped to \"-\">/<claudeSessionId>.jsonl to a fresh \"<new-uuid>.jsonl\" in the same dir, and set the fork's claudeSessionId:\"<new-uuid>\", sidHost:\"" + (s.host || "?") + "\", dirty:false. First ⚡ resumes the copied transcript (cold cache once).",
 "",
 "If this briefing arrives alongside other messages, just act on those — no need to comment on the briefing itself.",
   ].join("\n");
