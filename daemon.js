@@ -54,7 +54,7 @@ const PASS = process.env.AIRPORT_PASS || null;
 const CLAUDE_BIN = process.env.AIRPORT_CLAUDE_BIN || "claude";
 const DEFAULT_MODEL = process.env.AIRPORT_DEFAULT_MODEL || "claude-fable-5";
 const DEFAULT_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,TodoWrite";
-const TURN_TIMEOUT_MS = Number(process.env.AIRPORT_TURN_TIMEOUT_MS || 10 * 60 * 1000);
+const TURN_TIMEOUT_MS = Number(process.env.AIRPORT_TURN_TIMEOUT_MS || 0); // 0 = no limit (◼ stop is the brake)
 const MAX_CONCURRENT_TURNS = Number(process.env.AIRPORT_MAX_TURNS || 2);
 
 const expandHome = (p) => (p && p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
@@ -219,7 +219,9 @@ function run(cmd, attempt = 0) {
       : "⟲ transcript rebuilt from boxes (fresh cache prefix)")
       + (remapped ? `\n🧭 hangar here: ${cwd} (stored cwd doesn't fit this machine)` : ""), { synced: true, sys: true });
 
-  const killer = setTimeout(() => { log(`turn timeout (${id})`); try { process.kill(-child.pid, "SIGTERM"); } catch (_) {} }, TURN_TIMEOUT_MS);
+  const killer = TURN_TIMEOUT_MS > 0
+    ? setTimeout(() => { log(`turn timeout (${id})`); try { process.kill(-child.pid, "SIGTERM"); } catch (_) {} }, TURN_TIMEOUT_MS)
+    : null;
   let buf = "", stderr = "", finalResult = null, lastMsgUsage = null;
   child.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
   child.stdout.on("data", (d) => {

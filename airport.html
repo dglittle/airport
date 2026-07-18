@@ -1144,7 +1144,7 @@ function briefingText(id, s){
 "",
 "You are session \"" + id + "\" in airport, Greg's claude-session manager (github.com/dglittle/airport).",
 "",
-"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". Turn timeout: 10 minutes — for long work, save progress to files as you go.",
+"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". No turn time limit — though Greg can interrupt (◼) anytime, so for very long work, saving progress to files as you go is wise.",
 "- Your setup right now: cwd " + (s.cwd || "?") + " · model " + (s.model || "claude-fable-5") + " · context loading: CLAUDE.md " + onoff(!!s.useClaudeMd) + ", auto-memory " + onoff(s.useMemory !== false) + ", skills " + onoff(s.useSkills !== false) + ". Greg can change all of this (plus your system prompt, allowed tools, and even which machine you run on) from the UI.",
 "- The conversation you see is mirrored as editable \"boxes\" in the UI. Greg may edit or delete past boxes; after such an edit — or after moving you to another machine — your next turn runs on a transcript REBUILT from the visible text only: thinking and tool outputs are dropped. Under normal use your real transcript (tool results included) stays intact.",
 "- One prompt may be several user boxes stacked together — treat them as one message in order.",

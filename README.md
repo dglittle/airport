@@ -159,7 +159,7 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | `AIRPORT_SESS_ROOT` | daemon | `~/airport-sessions` | where remapped cwds live |
 | `AIRPORT_ROOTS` | daemon | *(none)* | extra cwd whitelist, colon-separated; `/` = allow everything |
 | `AIRPORT_MAX_TURNS` | daemon | `2` | concurrent turn cap default; per-airfield override in the UI (⚙), applies live |
-| `AIRPORT_TURN_TIMEOUT_MS` | daemon | `600000` | per-turn kill switch |
+| `AIRPORT_TURN_TIMEOUT_MS` | daemon | `0` *(no limit)* | optional per-turn kill switch; ◼ stop is the manual brake |
 | `AIRPORT_STATE_DIR` | both | `~/.airport` | `.env`, token state |
 | `OPENAI_API_KEY` | tower | *(unset)* | enables ☁︎ whisper transcription |
 
