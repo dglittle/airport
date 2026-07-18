@@ -92,13 +92,6 @@
     display:flex; align-items:center; justify-content:center; padding:0;
   }
   .emptytarmac{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; pointer-events:none; }
-  /* status legend — chrome, not part of the apron's spatial layout */
-  #legend{
-    position:absolute; left:10px; bottom:calc(6px + env(safe-area-inset-bottom)); z-index:5; pointer-events:none;
-    font:9.5px ui-monospace,Menlo,monospace; color:var(--dim); white-space:nowrap;
-  }
-  #legend .l-run{ color:var(--run); } #legend .l-hot{ color:var(--hot); }
-  #legend .l-new{ color:var(--new); } #legend .l-off{ color:var(--dim); opacity:.5; }
   /* allowance gauge — lives in the header bar, one span per account */
   #gauge{
     margin-left:auto; display:flex; flex-direction:column; align-items:flex-start; gap:1px; flex:0 0 auto;
@@ -338,7 +331,7 @@
     <button id="gear">⚙</button>
   </header>
 
-  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div id="legend"><span class="l-run">●</span> flying&nbsp; <span class="l-hot">●</span> warm cache (&lt;1h)&nbsp; <span class="l-new">●</span> unseen landing&nbsp; <span class="l-off">●</span> offline</div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
+  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
   <div id="cols">
     <div id="explorer"></div>
