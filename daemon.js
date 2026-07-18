@@ -180,7 +180,12 @@ function run(cmd, attempt = 0) {
 
   let resumeSid = cmd.meta.claudeSessionId;
   let synthed = false;
-  if (cmd.meta.dirty || !resumeSid || cmd.meta.sidHost !== HOST_NAME) {
+  // resumable = clean history, ran here last, AND the transcript actually exists in
+  // THIS effective cwd (claude locates sessions per-cwd — a remapped cwd, e.g. a
+  // fork of an empty-cwd session, won't see the parent's transcript)
+  const resumable = resumeSid && !cmd.meta.dirty && cmd.meta.sidHost === HOST_NAME &&
+    fs.existsSync(path.join(os.homedir(), ".claude", "projects", encodeCwd(cwd), resumeSid + ".jsonl"));
+  if (!resumable) {
     if ((cmd.history || []).length) {
       try { resumeSid = synthTranscript(cwd, model, cmd.history); synthed = true; }
       catch (e) { runDone(id, { failed: true, error: "synthesis failed: " + e.message }); return; }
@@ -276,8 +281,9 @@ function run(cmd, attempt = 0) {
       addBox(id, "tool", "✗ " + (finalResult?.result || finalResult?.subtype || ("claude exited " + code)) + (stderr ? "\n" + stderr.slice(0, 500) : ""), { synced: true, err: true });
     const u = finalResult?.usage;
     runDone(id, {
-      // normal runs keep sid; --fork-session runs get the CLI-minted new id from the result
-      claudeSessionId: (forking && finalResult?.session_id) ? finalResult.session_id : sid,
+      // normal runs keep sid; a SUCCESSFUL --fork-session run gets the CLI-minted new
+      // id from the result (a failed fork keeps the parent sid so the retry re-branches)
+      claudeSessionId: (forking && !failed && finalResult?.session_id) ? finalResult.session_id : sid,
       sidHost: HOST_NAME, failed: !!failed,
       error: failed ? String(finalResult?.subtype || ("exit " + code)) : null,
       stats: {

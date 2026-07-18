@@ -924,7 +924,7 @@ function buildCfg(cfg){
     // REAL fork when the parent is clean: first ⚡ runs `--resume <parent> --fork-session`
     // — full context (tool results + thinking), one cold cache write, parent untouched.
     // Fallback (no sid / edited history): mirror fork — text-only rebuild via dirty.
-    const real = !!(s2.claudeSessionId && !s2.dirty && s2.sidHost);
+    const real = !!(s2.claudeSessionId && !s2.dirty && s2.sidHost && s2.cwd); // empty cwd remaps per-id → parent transcript unreachable
     patch({ sessions: { [fid]: Object.assign({
       title: (s2.title || id) + " ⑂", emoji: s2.emoji || "🛩", host: s2.host, cwd: s2.cwd, model: s2.model, tools: s2.tools,
       systemPrompt: s2.systemPrompt, systemMode: s2.systemMode,
