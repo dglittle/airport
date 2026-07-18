@@ -202,13 +202,18 @@ function routeRun(id, text, fail) {
     else break;
   }
   if (!promptBoxes.length) return fail("nothing new to say — add a user box first");
+  // per-airfield turn cap: UI override (hosts[h].turnCap) > daemon's env default
+  const hostInfo = (doc[0].hosts || {})[s.host] || {};
+  const cap = Math.max(1, Number(hostInfo.turnCap) || Number(hostInfo.maxTurns) || 2);
+  const flying = Object.values(doc[0].sessions || {}).filter((x) => x && x.host === s.host && x.running).length;
+  if (flying >= cap) return fail("airfield '" + s.host + "' at its turn cap (" + flying + "/" + cap + ") — raise it in ⚙ or wait");
   const prompt = promptBoxes.map((b) => b.text).join("\n\n");
   const history = boxes.slice(0, boxes.length - promptBoxes.length)
     .filter((b) => b.role === "user" || b.role === "ai")
     .map((b) => ({ role: b.role, text: b.text || "" }));
   apply({ sessions: { [id]: { running: true, state: "processing", startedAt: Date.now(), lastError: null } } });
   try {
-    host.send(JSON.stringify({ type: "run", session: id, prompt, history,
+    host.send(JSON.stringify({ type: "run", session: id, prompt, history, cap,
       meta: { cwd: s.cwd || "", model: s.model || "", systemPrompt: s.systemPrompt || "",
               systemMode: s.systemMode || "append", tools: s.tools || "",
               useClaudeMd: !!s.useClaudeMd, useMemory: s.useMemory !== false, useSkills: s.useSkills !== false,

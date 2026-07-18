@@ -142,6 +142,10 @@
   .sheet .btns button.go{ background:linear-gradient(180deg,#3a2c12,#22190a); border-color:var(--accent); color:var(--ink); flex:2; }
   .sheet .btns button.danger{ border-color:var(--bad); color:var(--bad); }
   .sheet .hint{ color:var(--dim); font-size:10px; font-family:ui-monospace,Menlo,monospace; margin-top:8px; min-height:12px; }
+  .sheet .hostrow{ display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+  .sheet .hostrow span{ flex:1; overflow:hidden; text-overflow:ellipsis; }
+  .sheet .hostrow span .off{ color:var(--dim); }
+  .sheet .hostrow input{ width:74px; flex:0 0 auto; text-align:center; }
   .gate{ text-align:center; }
   .gate .big{ font-size:34px; margin-bottom:6px; }
   .gate p{ color:var(--muted); font-size:12.5px; }
@@ -704,13 +708,25 @@ function sheet(html, wire){
   return ov;
 }
 function serverSheet(){
+  const hh = hosts();
+  const hostRows = Object.keys(hh).sort().map((n) => {
+    const h = hh[n] || {};
+    return `<div class="hostrow"><span>${esc(n)}${h.online ? "" : ' <span class="off">(offline)</span>'}</span>
+      <input type="number" min="1" max="16" data-cap="${esc(n)}" value="${h.turnCap ?? h.maxTurns ?? 2}"></div>`;
+  }).join("");
   sheet(`
     <h3>tower</h3>
     <label>tower url</label><input id="f-url" value="${esc(BASE)}" placeholder="https://tower.example:7800" autocomplete="off">
     <label>passphrase (if the tower has one)</label><input id="f-pass" type="password" value="${esc(localStorage.getItem(LS_PASS) || "")}" autocomplete="off">
+    ${hostRows ? `<label>airfields — parallel turn cap</label>${hostRows}` : ""}
     <div class="btns"><button data-x>cancel</button><button class="go" id="f-go">connect</button></div>
-    <div class="hint">the html can be opened anywhere — it just needs this URL</div>`,
+    <div class="hint">${hostRows ? "caps apply immediately (no restart) · " : ""}the html can be opened anywhere — it just needs this URL</div>`,
   (ov) => {
+    ov.querySelectorAll("[data-cap]").forEach((inp) => inp.addEventListener("change", () => {
+      const v = Math.max(1, Math.min(16, Math.round(+inp.value || 2)));
+      inp.value = v;
+      patch({ hosts: { [inp.dataset.cap]: { turnCap: v } } });
+    }));
     ov.querySelector("#f-go").addEventListener("click", () => {
       BASE = ov.querySelector("#f-url").value.trim().replace(/\/+$/, "");
       localStorage.setItem(LS_URL, BASE);

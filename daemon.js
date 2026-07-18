@@ -165,7 +165,9 @@ function failRun(id, error) {
 function run(cmd, attempt = 0) {
   const id = cmd.session;
   if (procs.has(id)) { failRun(id, "already running here"); return; }
-  if (procs.size >= MAX_CONCURRENT_TURNS) { failRun(id, "ground crew busy (turn cap " + MAX_CONCURRENT_TURNS + ")"); return; }
+  // cap: the tower sends the per-airfield value (UI-adjustable); env is the fallback
+  const cap = Math.max(1, Number(cmd.cap) || MAX_CONCURRENT_TURNS);
+  if (procs.size >= cap) { failRun(id, "ground crew busy (turn cap " + cap + ")"); return; }
   if (!TOKENS.length && process.env.ANTHROPIC_API_KEY) {
     failRun(id, "ANTHROPIC_API_KEY is set and no oauth tokens configured — that would bill cash, not the plan"); return;
   }
@@ -365,7 +367,8 @@ function connect() {
     connecting = false; towerWs = ws;
     towerSend({ type: "auth", role: "host", host: HOST_NAME, pass: PASS,
       info: { platform: os.platform(), sessRoot: SESS_ROOT, roots: WHITELIST,
-              defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length } });
+              defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length,
+              maxTurns: MAX_CONCURRENT_TURNS } });
     log("tower connected");
   });
   ws.addEventListener("message", (e) => {
