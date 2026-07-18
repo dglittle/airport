@@ -921,14 +921,22 @@ function buildCfg(cfg){
     do { fid = id + "-f" + n++; } while (sessions()[fid]);
     const copy = {};
     for (const b of boxesOf(s2)) copy[b.key] = { role: b.role, text: b.text, ts: b.ts, synced: b.synced || null };
-    patch({ sessions: { [fid]: {
+    // REAL fork when the parent is clean: first ⚡ runs `--resume <parent> --fork-session`
+    // — full context (tool results + thinking), one cold cache write, parent untouched.
+    // Fallback (no sid / edited history): mirror fork — text-only rebuild via dirty.
+    const real = !!(s2.claudeSessionId && !s2.dirty && s2.sidHost);
+    patch({ sessions: { [fid]: Object.assign({
       title: (s2.title || id) + " ⑂", emoji: s2.emoji || "🛩", host: s2.host, cwd: s2.cwd, model: s2.model, tools: s2.tools,
       systemPrompt: s2.systemPrompt, systemMode: s2.systemMode,
       useClaudeMd: s2.useClaudeMd || null, useMemory: s2.useMemory === false ? false : null, useSkills: s2.useSkills === false ? false : null,
       x: Math.min(0.9, (s2.x || 0.5) + 0.1), y: Math.min(0.85, (s2.y || 0.5) + 0.07),
-      createdAt: Date.now(), state: "ready", dirty: true, messages: copy,
-    } } });
+      createdAt: Date.now(), state: "ready", messages: copy,
+    }, real
+      ? { claudeSessionId: s2.claudeSessionId, sidHost: s2.sidHost, dirty: false, forkNext: true }
+      : { dirty: true }) } });
     openSession(fid);
+    hint(real ? "⑂ full-context fork — first ⚡ branches the real transcript (one cold cache write)"
+              : "⑂ mirror fork — first ⚡ rebuilds from the text mirror");
   });
   cfg.querySelector("#c-del").addEventListener("click", (e) => {
     const btn = e.currentTarget;
@@ -1169,8 +1177,9 @@ function briefingText(id, s){
 "- One prompt may be several user boxes stacked together — treat them as one message in order.",
 "- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. Greg is often on his phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
 "- The UI has a file explorer + editor rooted at your cwd — writing files there is the best way to deliver artifacts (.html renders, .md renders, small images preview).",
-"- FORKING (branching a session): Greg uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus dirty:true, state:\"ready\", and x/y (0..1 fractions, its spot on the tarmac). dirty:true means the fork rebuilds its transcript from the text mirror on first ⚡ — visible conversation only, cold cache.",
-"- Fork WITH full context (keeps tool results + thinking): instead of dirty:true, copy your transcript file ~/.claude/projects/<cwd with [/._] mapped to \"-\">/<claudeSessionId>.jsonl to a fresh \"<new-uuid>.jsonl\" in the same dir, and set the fork's claudeSessionId:\"<new-uuid>\", sidHost:\"" + (s.host || "?") + "\", dirty:false. First ⚡ resumes the copied transcript (cold cache once).",
+"- FORKING (branching a session): Greg uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus state:\"ready\" and x/y (0..1 tarmac fractions), THEN one of:",
+"  · FULL-CONTEXT fork (preferred — keeps tool results + thinking): also copy claudeSessionId + sidHost from the source and set dirty:false, forkNext:true. The fork's first ⚡ runs `--resume <parent> --fork-session`: the CLI branches the real transcript under a new session id. One cold cache write of the full context (session-scoped prompt cache follows the session id, so forks can't cache-hit the parent — measured, not folklore).",
+"  · MIRROR fork (cheap, text-only): set dirty:true instead. First ⚡ rebuilds from the visible conversation only.",
 "",
 "If this briefing arrives alongside other messages, just act on those — no need to comment on the briefing itself.",
   ].join("\n");

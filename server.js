@@ -217,7 +217,8 @@ function routeRun(id, text, fail) {
       meta: { cwd: s.cwd || "", model: s.model || "", systemPrompt: s.systemPrompt || "",
               systemMode: s.systemMode || "append", tools: s.tools || "",
               useClaudeMd: !!s.useClaudeMd, useMemory: s.useMemory !== false, useSkills: s.useSkills !== false,
-              claudeSessionId: s.claudeSessionId || null, sidHost: s.sidHost || null, dirty: !!s.dirty } }));
+              claudeSessionId: s.claudeSessionId || null, sidHost: s.sidHost || null, dirty: !!s.dirty,
+              forkNext: !!s.forkNext } }));
   } catch (_) {
     apply({ sessions: { [id]: { running: false, state: "ready" } } });
     return fail("host send failed");
@@ -485,6 +486,9 @@ wss.on("connection", (ws) => {
       const patch = { running: false, state: "ready", lastRunEndedAt: Date.now(),
         turns: (s.turns || 0) + 1, dirty: false, messages: sweep };
       if (m.claudeSessionId) { patch.claudeSessionId = m.claudeSessionId; patch.sidHost = m.sidHost || s.host; }
+      // a successful fork turn consumed forkNext (the daemon reported the NEW sid);
+      // a failed one keeps it so the next ⚡ re-attempts the branch (never appends to the parent)
+      if (s.forkNext) patch.forkNext = m.failed ? true : null;
       if (m.stats) {
         patch.lastCost = m.stats.cost || 0; patch.lastMs = m.stats.ms || 0;
         patch.totalTokens = m.stats.ctx || 0;

@@ -202,6 +202,10 @@ function run(cmd, attempt = 0) {
   if (cmd.meta.systemPrompt) // part of the cache prefix — byte-stable across runs
     args.push(cmd.meta.systemMode === "replace" ? "--system-prompt" : "--append-system-prompt", cmd.meta.systemPrompt);
   args.push(resumeSid ? "--resume" : "--session-id", sid);
+  // real fork: branch the parent's transcript under a NEW session id (full context
+  // incl. tool results; the CLI mints the id — we pick it up from the result event)
+  const forking = !!(cmd.meta.forkNext && resumeSid && !synthed);
+  if (forking) args.push("--fork-session");
 
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY; // subscription runs only — never bill cash by accident
@@ -272,7 +276,9 @@ function run(cmd, attempt = 0) {
       addBox(id, "tool", "✗ " + (finalResult?.result || finalResult?.subtype || ("claude exited " + code)) + (stderr ? "\n" + stderr.slice(0, 500) : ""), { synced: true, err: true });
     const u = finalResult?.usage;
     runDone(id, {
-      claudeSessionId: sid, sidHost: HOST_NAME, failed: !!failed,
+      // normal runs keep sid; --fork-session runs get the CLI-minted new id from the result
+      claudeSessionId: (forking && finalResult?.session_id) ? finalResult.session_id : sid,
+      sidHost: HOST_NAME, failed: !!failed,
       error: failed ? String(finalResult?.subtype || ("exit " + code)) : null,
       stats: {
         ms: finalResult?.duration_api_ms || 0, cost: finalResult?.total_cost_usd || 0,

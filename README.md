@@ -67,8 +67,14 @@ since you last looked, dimmed = its machine is offline.
   transcript from the boxes. You're choosing mirror-over-reality (the rebuilt
   transcript has only user/ai text — thinking and tool traffic don't survive);
   a ⟲ box notes it. Cost: one cold cache read.
-- **Fork** (⑂) copies the whole session (params + boxes, `dirty`) — a branch
-  point. **Delete** removes it from the doc (transcript files stay on disk).
+- **Fork** (⑂) branches a session. When the parent is clean, it's a REAL fork:
+  the first ⚡ runs `--resume <parent> --fork-session`, branching the actual
+  transcript (tool results + thinking included) under a new session id — one
+  cold cache write (session-scoped prompt cache follows the session id, so
+  forks can't cache-hit the parent; measured on 2.1.207). If the parent has no
+  resumable transcript (or edited history), it falls back to a mirror fork:
+  `dirty` + text-only rebuild. **Delete** removes a session from the doc
+  (transcript files stay on disk).
 - **Flying** (marina's sailing): change the session's *airfield* in its flight
   plan — the next ⚡ rebuilds the transcript on the new machine (one cold read,
   🛬 box). A stored cwd that doesn't fit the target machine's whitelist remaps
