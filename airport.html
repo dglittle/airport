@@ -614,6 +614,8 @@ function renderGauge(){
 // ---------- the tarmac (the square apron; everything scales with --S) ----------
 let dragState = null;
 const DISC = 0.125;            // disc side as a fraction of the apron side
+let APRON_S = 300;             // the apron's set side. Drag math MUST use this, not
+                               // clientWidth (which excludes the border → release jump)
 function renderTarmac(){
   $("back").style.display = "none";
   $("hdr-title").textContent = "✈ airport";
@@ -629,6 +631,7 @@ function renderTarmac(){
   // fractions of the square, so the field looks the same on phone and desktop
   const W = tarmacEl.clientWidth, H = tarmacEl.clientHeight;
   const S = Math.max(200, Math.min(W, H) - 10);
+  APRON_S = S;
   apron.style.width = apron.style.height = S + "px";
   apron.style.left = ((W - S) / 2) + "px";
   apron.style.top = ((H - S) / 2) + "px";
@@ -687,7 +690,7 @@ function wirePlane(el){
     if (!dragState.moved && Math.hypot(dx, dy) < 8) return;
     dragState.moved = true;
     el.classList.add("dragging");
-    const S = $("apron").clientWidth;
+    const S = APRON_S;
     el.style.left = (clampX((dragState.ox + dx) / S) * S) + "px";
     el.style.top = (clampY((dragState.oy + dy) / S) * S) + "px";
   });
@@ -696,7 +699,7 @@ function wirePlane(el){
     const d = dragState; dragState = null;
     el.classList.remove("dragging");
     if (d.moved) {
-      const S = $("apron").clientWidth;
+      const S = APRON_S;
       patch({ sessions: { [d.id]: {
         x: clampX(parseFloat(el.style.left) / S),
         y: clampY(parseFloat(el.style.top) / S) } } });
