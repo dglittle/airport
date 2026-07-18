@@ -683,7 +683,7 @@ function renderTarmac(){
       const off = !hostUp(s.host);
       const meta = s.running
         ? `<span class="runm">✈${fmtFly(Date.now() - (s.startedAt || Date.now()))}</span>`
-        : isHot(s) ? `<span class="hotm">hot·${ago(s.lastRunEndedAt)}</span>`
+        : isHot(s) ? `<span class="hotm">${ago(s.lastRunEndedAt)}</span>` // green tint + ring = hot; no word needed
         : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
       el.innerHTML = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
