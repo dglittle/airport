@@ -1010,10 +1010,9 @@ function mdHtml(src){
 
 const WHO = { user: "you", ai: "claude", tool: "tool" };
 const collapseOverride = {};  // `${session}:${key}` -> user-toggled collapse (wins over the auto rule)
-const RECENT_OPEN = 6;        // boxes at the tail that start expanded; everything older chips
 function boxCollapsed(b, i, len){
   const isBottom = i === len - 1;
-  const auto = (b.role === "tool" && !isBottom) || !!b.brief || i < len - RECENT_OPEN;
+  const auto = (b.role === "tool" && !isBottom) || !!b.brief;
   return editing !== b.key && (collapseOverride[view + ":" + b.key] ?? auto);
 }
 function chipLabel(b){
