@@ -1093,55 +1093,107 @@ function renderSession(){
   const nearBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 120;
   const msgs = ensureCfg();  // settings panel rides at the top of the same scroll
   syncCfg();                 // pull remote changes into non-focused fields
-  msgs.innerHTML = (boxes.length ? boxes.map((b, i) => turnHtml(b, i, boxes.length)).join("") : `<div class="emptyfeed">empty hold — add a box below</div>`)
-    + (s.running ? `<div class="thinking"><span></span><span></span><span></span><i class="flytime">✈ ${fmtFly(Date.now() - (s.startedAt || Date.now()))}</i></div>` : "");
+  reconcileFeed(msgs, s, boxes);
   if (nearBottom) feedEl.scrollTop = feedEl.scrollHeight;
+  updateJumps();
+}
 
-  feedEl.querySelectorAll(".htmlframe").forEach(f => {
-    const b = (s.messages || {})[f.dataset.key];
-    if (b) f.srcdoc = b.text || "";
-  });
-  feedEl.querySelectorAll("[data-tgl]").forEach(el => el.addEventListener("click", () => {
-    const key = el.dataset.tgl, b = (s.messages || {})[key];
-    if (!b) return;
-    const idx = boxes.findIndex((x) => x.key === key);
-    collapseOverride[view + ":" + key] = !boxCollapsed({ ...b, key }, idx, boxes.length);
-    keepScroll(renderSession);
-  }));
-  feedEl.querySelectorAll("[data-fmt]").forEach(btn => btn.addEventListener("click", () => {
-    const key = btn.dataset.fmt, b = (s.messages || {})[key];
-    if (!b) return;
-    const gk = view + ":" + key;
-    const cur = fmtOverride[gk] || (b.role === "tool" ? "txt" : guessFmt(b.text || ""));
-    const next = FMTS[(FMTS.indexOf(cur) + 1) % FMTS.length];
-    if (next === guessFmt(b.text || "") && b.role !== "tool") delete fmtOverride[gk]; else fmtOverride[gk] = next;
-    keepScroll(renderSession);
-  }));
-  feedEl.querySelectorAll("[data-edit]").forEach(btn => btn.addEventListener("click", () => {
-    editing = btn.dataset.edit; confirming = null; keepScroll(renderSession);
-  }));
-  feedEl.querySelectorAll("[data-esave]").forEach(btn => btn.addEventListener("click", () => {
-    const key = btn.dataset.esave;
+// ---------- keyed feed reconciliation ----------
+// Rebuild ONLY boxes whose rendered state changed. Untouched DOM stays put — so
+// iframes with agent-authored HTML never reload on unrelated deltas (an iframe
+// reloads even on reparenting, so stability beats any vdom here).
+function boxSig(b, i, len){
+  return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.err, !!b.sys, !!b.brief, b.stats || null,
+    boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null]);
+}
+function reconcileFeed(msgs, s, boxes){
+  const len = boxes.length;
+  const want = new Set(boxes.map(b => b.key));
+  for (const el of [...msgs.children]) {
+    const k = el.dataset.bk;
+    if (k === "__thinking") continue;
+    if (!k || !want.has(k)) el.remove();   // deleted boxes, stale empty-note
+  }
+  if (!len) {
+    if (!msgs.querySelector(".emptyfeed")) {
+      const e = document.createElement("div");
+      e.className = "emptyfeed"; e.dataset.bk = "__empty";
+      e.textContent = "empty hold — add a box below";
+      msgs.prepend(e);
+    }
+  }
+  let prev = null;
+  for (let i = 0; i < len; i++) {
+    const b = boxes[i];
+    let el = msgs.querySelector(`:scope > [data-bk="${b.key}"]`);
+    const sig = boxSig(b, i, len);
+    if (el && el.dataset.sig === sig) { prev = el; continue; }
+    const tpl = document.createElement("template");
+    tpl.innerHTML = turnHtml(b, i, len).trim();
+    const fresh = tpl.content.firstElementChild;
+    fresh.dataset.bk = b.key; fresh.dataset.sig = sig;
+    const fr = fresh.querySelector(".htmlframe");
+    if (fr) fr.srcdoc = b.text || "";
+    if (el) el.replaceWith(fresh);
+    else msgs.insertBefore(fresh, prev ? prev.nextElementSibling : msgs.firstElementChild);
+    prev = fresh;
+  }
+  let think = msgs.querySelector('[data-bk="__thinking"]');
+  if (s.running) {
+    if (!think) {
+      think = document.createElement("div");
+      think.className = "thinking"; think.dataset.bk = "__thinking";
+      think.innerHTML = `<span></span><span></span><span></span><i class="flytime"></i>`;
+    }
+    if (msgs.lastElementChild !== think) msgs.appendChild(think);
+    think.querySelector(".flytime").textContent = "✈ " + fmtFly(Date.now() - (s.startedAt || Date.now()));
+  } else if (think) think.remove();
+}
+
+// feed interactions — ONE delegated listener (survives reconciliation)
+feedEl.addEventListener("click", (e) => {
+  if (!view) return;
+  const s = sess(view);
+  const hit = (sel) => e.target.closest && e.target.closest(sel);
+  let t;
+  if ((t = hit("[data-esave]"))) {
+    const key = t.dataset.esave;
     const text = $("edit-" + key).value;
     const b = (s.messages || {})[key];
     editing = null;
     const p = { messages: { [key]: { text } } };
     if (b && b.synced) p.dirty = true;
     patch({ sessions: { [view]: p } });
-  }));
-  feedEl.querySelectorAll("[data-ecancel]").forEach(btn => btn.addEventListener("click", () => {
-    editing = null; confirming = null; keepScroll(renderSession);
-  }));
-  feedEl.querySelectorAll("[data-confirm]").forEach(btn => btn.addEventListener("click", () => {
-    confirming = btn.dataset.confirm; editing = null; keepScroll(renderSession);
-  }));
-  feedEl.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => delBoxes([btn.dataset.del])));
-  feedEl.querySelectorAll("[data-delbelow]").forEach(btn => btn.addEventListener("click", () => {
+    return;
+  }
+  if ((t = hit("[data-ecancel]"))) { editing = null; confirming = null; keepScroll(renderSession); return; }
+  if ((t = hit("[data-del]"))) { delBoxes([t.dataset.del]); return; }
+  if ((t = hit("[data-delbelow]"))) {
     const keys = boxesOf(s).map(b => b.key);
-    delBoxes(keys.slice(keys.indexOf(btn.dataset.delbelow)));
-  }));
-  updateJumps();
-}
+    delBoxes(keys.slice(keys.indexOf(t.dataset.delbelow)));
+    return;
+  }
+  if ((t = hit("[data-confirm]"))) { confirming = t.dataset.confirm; editing = null; keepScroll(renderSession); return; }
+  if ((t = hit("[data-edit]"))) { editing = t.dataset.edit; confirming = null; keepScroll(renderSession); return; }
+  if ((t = hit("[data-fmt]"))) {
+    const key = t.dataset.fmt, b = (s.messages || {})[key];
+    if (!b) return;
+    const gk = view + ":" + key;
+    const cur = fmtOverride[gk] || (b.role === "tool" ? "txt" : guessFmt(b.text || ""));
+    const next = FMTS[(FMTS.indexOf(cur) + 1) % FMTS.length];
+    if (next === guessFmt(b.text || "") && b.role !== "tool") delete fmtOverride[gk]; else fmtOverride[gk] = next;
+    keepScroll(renderSession);
+    return;
+  }
+  if ((t = hit("[data-tgl]"))) {
+    const key = t.dataset.tgl, b = (s.messages || {})[key];
+    if (!b) return;
+    const boxes = boxesOf(s);
+    const idx = boxes.findIndex((x) => x.key === key);
+    collapseOverride[view + ":" + key] = !boxCollapsed({ ...b, key }, idx, boxes.length);
+    keepScroll(renderSession);
+  }
+});
 function keepScroll(fn){ const t = feedEl.scrollTop; fn(); feedEl.scrollTop = t; }
 function delBoxes(keys){
   const s = sess(view);
