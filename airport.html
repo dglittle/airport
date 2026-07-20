@@ -231,6 +231,10 @@
   .thinking span:nth-child(2){ animation-delay:.2s } .thinking span:nth-child(3){ animation-delay:.4s }
   .thinking .flytime{ font:10px ui-monospace,Menlo,monospace; font-style:normal; color:var(--run); margin-left:6px; }
   .emptyfeed{ color:var(--dim); text-align:center; padding:50px 0; }
+  .daysep{
+    text-align:center; color:var(--dim); font:10px ui-monospace,Menlo,monospace;
+    letter-spacing:.08em; margin:14px 0 10px; max-width:820px; -webkit-user-select:none; user-select:none;
+  }
 
   /* ---------- inline session settings (top of feed) ---------- */
   .cfg{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; padding:10px 12px 12px; margin-bottom:12px; max-width:820px; }
@@ -480,6 +484,15 @@ function boxesOf(s){ return Object.keys(s.messages || {}).sort().map(k => ({ key
 function fmtTok(n){ if (!n) return "–"; if (n >= 1e6) return (n/1e6).toFixed(1)+"M"; if (n >= 1e3) return Math.round(n/1e3)+"k"; return String(n); }
 function fmtDur(ms){ const s = ms/1000; if (s < 60) return s.toFixed(1)+"s"; const m = Math.floor(s/60); return m+"m "+Math.round(s%60)+"s"; }
 function fmtT(ts){ return ts ? new Date(ts).toLocaleTimeString([], {hour12:false}) : ""; }
+function dayKey(ts){ const d = new Date(ts); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function dayLabel(ts){
+  const now = new Date(), k = dayKey(ts);
+  if (k === dayKey(now.getTime())) return "today";
+  if (k === dayKey(now.getTime() - 86400000)) return "yesterday";
+  const d = new Date(ts);
+  return MONTHS[d.getMonth()] + " " + d.getDate() + (d.getFullYear() !== now.getFullYear() ? " " + d.getFullYear() : "");
+}
 function ago(ts){
   if (!ts) return "";
   const s = Math.floor((Date.now()-ts)/1000);
@@ -540,7 +553,7 @@ function connect(){
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
 }
 setInterval(() => send({ type: "ping" }), 30000);
-setInterval(() => { if (!doc[0]) return; renderGauge(); if (!view) renderTarmac(); }, 30000); // ago/gauge refresh
+setInterval(() => { if (!doc[0]) return; renderGauge(); view ? renderSession() : renderTarmac(); }, 30000); // ago/gauge/daysep refresh (session render is sig-gated → near-free)
 // flight clock: tick every second while anything is flying
 setInterval(() => {
   if (!doc[0]) return;
@@ -1056,7 +1069,7 @@ function turnHtml(b, i, len){
   <div class="turn ${cls2}${b.err ? " err" : ""}">
     <div class="row1">
       <span class="who" data-tgl="${b.key}">${WHO[b.role] || b.role}${b.synced ? "" : " ·pending"}</span>
-      <span class="when" data-tgl="${b.key}">${fmtT(b.ts)}</span>
+      <span class="when" data-tgl="${b.key}" title="${b.ts ? esc(new Date(b.ts).toLocaleString()) : ""}">${fmtT(b.ts)}</span>
       <span class="grow"></span>
       <button class="bbtn${forced ? " forced" : ""}" data-fmt="${b.key}">${fmt}</button>
       <button class="bbtn" data-edit="${b.key}">✎</button>
@@ -1108,11 +1121,22 @@ function boxSig(b, i, len){
 }
 function reconcileFeed(msgs, s, boxes){
   const len = boxes.length;
-  const want = new Set(boxes.map(b => b.key));
+  // render items = boxes, plus a day divider wherever the calendar day changes
+  const items = [];
+  let lastDay = null;
+  for (let i = 0; i < len; i++) {
+    const b = boxes[i];
+    if (b.ts) {
+      const k = dayKey(b.ts);
+      if (k !== lastDay) { items.push({ key: "__day-" + k, ts: b.ts }); lastDay = k; }
+    }
+    items.push({ key: b.key, b, i });
+  }
+  const want = new Set(items.map(x => x.key));
   for (const el of [...msgs.children]) {
     const k = el.dataset.bk;
     if (k === "__thinking") continue;
-    if (!k || !want.has(k)) el.remove();   // deleted boxes, stale empty-note
+    if (!k || !want.has(k)) el.remove();   // deleted boxes, stale dividers/empty-note
   }
   if (!len) {
     if (!msgs.querySelector(".emptyfeed")) {
@@ -1123,17 +1147,16 @@ function reconcileFeed(msgs, s, boxes){
     }
   }
   let prev = null;
-  for (let i = 0; i < len; i++) {
-    const b = boxes[i];
-    let el = msgs.querySelector(`:scope > [data-bk="${b.key}"]`);
-    const sig = boxSig(b, i, len);
+  for (const it of items) {
+    let el = msgs.querySelector(`:scope > [data-bk="${it.key}"]`);
+    const sig = it.b ? boxSig(it.b, it.i, len) : dayLabel(it.ts); // label in sig → midnight rollover self-corrects
     if (el && el.dataset.sig === sig) { prev = el; continue; }
     const tpl = document.createElement("template");
-    tpl.innerHTML = turnHtml(b, i, len).trim();
+    tpl.innerHTML = it.b ? turnHtml(it.b, it.i, len).trim() : `<div class="daysep">— ${esc(dayLabel(it.ts))} —</div>`;
     const fresh = tpl.content.firstElementChild;
-    fresh.dataset.bk = b.key; fresh.dataset.sig = sig;
+    fresh.dataset.bk = it.key; fresh.dataset.sig = sig;
     const fr = fresh.querySelector(".htmlframe");
-    if (fr) fr.srcdoc = b.text || "";
+    if (fr) fr.srcdoc = (it.b && it.b.text) || "";
     if (el) el.replaceWith(fresh);
     else msgs.insertBefore(fresh, prev ? prev.nextElementSibling : msgs.firstElementChild);
     prev = fresh;
