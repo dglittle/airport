@@ -369,7 +369,8 @@ function gitOp(cmd) {
   try { root = effectiveCwd(cmd.session, cmd.cwd).cwd; }
   catch (e) { res.ok = false; res.error = e.message; towerSend(res); return; }
   const send = () => towerSend(res);
-  const git = (args, cb) => execFile("git", args, { cwd: root, maxBuffer: 8 * 1024 * 1024, timeout: 20000 }, cb);
+  const git = (args, cb) => execFile("git", args, { cwd: root, maxBuffer: 8 * 1024 * 1024, timeout: 20000 },
+    (e, out, err) => cb(e && e.code === "ENOENT" ? Object.assign(e, { message: "git isn't installed on " + HOST_NAME }) : e, out, err));
   const sub = String(cmd.sub || "");
   if (sub === "status") {
     git(["status", "--porcelain=v1", "-uall"], (e, out, err) => {
