@@ -185,6 +185,7 @@ function hostSocket(hostName) {
   return null;
 }
 const fsWaiters = new Map(); // reqId -> browser socket
+const termOwners = new Map(); // termId -> {ws (browser), hostName}
 
 // ---------- run routing (the ⚡): tower builds a self-contained command ----------
 function routeRun(id, text, fail) {
@@ -521,8 +522,34 @@ wss.on("connection", (ws) => {
       if (!host) return bounce("ground crew offline");
       fsWaiters.set(m.reqId, ws);
       setTimeout(() => fsWaiters.delete(m.reqId), 30000);
-      try { host.send(JSON.stringify({ type: "fs", reqId: m.reqId, session: m.session, cwd: s.cwd || "", op: m.op, rel: m.rel || "", text: m.text, ifAbsent: m.ifAbsent })); }
+      try { host.send(JSON.stringify({ type: "fs", reqId: m.reqId, session: m.session, cwd: s.cwd || "", op: m.op, rel: m.rel || "", text: m.text, ifAbsent: m.ifAbsent, sub: m.sub, hash: m.hash })); }
       catch (_) { fsWaiters.delete(m.reqId); bounce("host send failed"); }
+      return;
+    }
+    // ---- terminals: browser <-> the session's ground crew, tower relays ----
+    if (m.type === "term" && ws._role === "browser" && typeof m.termId === "string" && m.termId.length <= 24) {
+      if (m.action === "open" && typeof m.session === "string") {
+        const s = sess(m.session);
+        const bounce = (error) => { try { ws.send(JSON.stringify({ type: "term-exit", termId: m.termId, error })); } catch (_) {} };
+        if (!s) return bounce("no such session");
+        const host = hostSocket(s.host);
+        if (!host) return bounce("ground crew offline");
+        termOwners.set(m.termId, { ws, hostName: s.host });
+        try { host.send(JSON.stringify({ type: "term", action: "open", termId: m.termId, session: m.session, cwd: s.cwd || "", cols: m.cols, rows: m.rows })); }
+        catch (_) { termOwners.delete(m.termId); bounce("host send failed"); }
+        return;
+      }
+      const o = termOwners.get(m.termId);
+      if (!o || o.ws !== ws) return;
+      const host = hostSocket(o.hostName);
+      if (host) { try { host.send(JSON.stringify({ type: "term", action: m.action === "kill" ? "kill" : "in", termId: m.termId, data: typeof m.data === "string" ? m.data.slice(0, 16384) : undefined })); } catch (_) {} }
+      if (m.action === "kill") termOwners.delete(m.termId);
+      return;
+    }
+    if ((m.type === "term-data" || m.type === "term-exit") && ws._role === "host" && typeof m.termId === "string") {
+      const o = termOwners.get(m.termId);
+      if (o && o.ws.readyState === 1) { try { o.ws.send(JSON.stringify(m)); } catch (_) {} }
+      if (m.type === "term-exit") termOwners.delete(m.termId);
       return;
     }
     if (m.type === "fs-res" && ws._role === "host" && m.reqId) {
@@ -537,6 +564,13 @@ wss.on("connection", (ws) => {
     clearTimeout(authTimer);
     if (!clients.delete(ws)) return;
     log(`- ${ws._role || "?"}${ws._host ? ":" + ws._host : ""} peer=${peerId} (${clients.size} clients)`);
+    // reap this browser's terminals on the daemons
+    for (const [tid, o] of termOwners) {
+      if (o.ws !== ws) continue;
+      const host = hostSocket(o.hostName);
+      if (host) { try { host.send(JSON.stringify({ type: "term", action: "kill", termId: tid })); } catch (_) {} }
+      termOwners.delete(tid);
+    }
     if (ws._role === "host" && ws._host && !hostSocket(ws._host)) {
       const patch = { hosts: { [ws._host]: { online: false, lastSeen: Date.now() } }, sessions: {} };
       for (const [id, s] of Object.entries(doc[0].sessions || {})) {
@@ -546,6 +580,13 @@ wss.on("connection", (ws) => {
         patch.sessions[id] = { state: "offline", running: false };
       }
       apply(patch);
+      // its PTYs died with it (a superseded socket keeps the daemon process — and
+      // its terminals — alive, so this runs only when the host is truly gone)
+      for (const [tid, o] of termOwners) {
+        if (o.hostName !== ws._host) continue;
+        try { o.ws.send(JSON.stringify({ type: "term-exit", termId: tid, error: "ground crew offline" })); } catch (_) {}
+        termOwners.delete(tid);
+      }
       log(`ground crew '${ws._host}' gone — its sessions offline`);
     }
   });

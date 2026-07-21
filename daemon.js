@@ -316,6 +316,90 @@ function interrupt(id) {
   addBox(id, "tool", "◼ interrupted", { synced: true, sys: true });
 }
 
+// ---------- terminals (a real PTY, no native deps) ----------
+// python3's pty module wins: BSD script(1) dies on node's socketpair stdio
+// ("tcgetattr: Operation not supported on socket"). util-linux script(1)
+// tolerates it, so linux-without-python still has a fallback; mac does not.
+const HAVE_PY3 = (() => {
+  try { return require("child_process").spawnSync("python3", ["-c", "import pty"], { timeout: 8000 }).status === 0; }
+  catch (_) { return false; }
+})();
+const terms = new Map(); // termId -> child
+function termOpen(m) {
+  if (terms.has(m.termId)) return;
+  let cwd;
+  try { ({ cwd } = effectiveCwd(m.session, m.cwd)); }
+  catch (e) { towerSend({ type: "term-exit", termId: m.termId, error: "cwd: " + e.message }); return; }
+  const shell = process.env.SHELL || (os.platform() === "darwin" ? "/bin/zsh" : "/bin/bash");
+  if (!HAVE_PY3 && os.platform() === "darwin") {
+    towerSend({ type: "term-exit", termId: m.termId, error: "python3 required for the terminal on macOS" });
+    return;
+  }
+  const [bin, args] = HAVE_PY3
+    ? ["python3", ["-c", "import pty,sys; pty.spawn(sys.argv[1:])", shell, "-il"]]
+    : ["script", ["-qfc", shell + " -il", "/dev/null"]];
+  const env = { ...process.env, TERM: "xterm-256color" };
+  delete env.ANTHROPIC_API_KEY;
+  let child;
+  try { child = spawn(bin, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] }); }
+  catch (e) { towerSend({ type: "term-exit", termId: m.termId, error: "spawn: " + e.message }); return; }
+  terms.set(m.termId, child);
+  const cols = Math.max(20, Math.min(500, Number(m.cols) || 100));
+  const rows = Math.max(5, Math.min(200, Number(m.rows) || 30));
+  try { child.stdin.write(`stty cols ${cols} rows ${rows} 2>/dev/null; clear\n`); } catch (_) {}
+  const onData = (d) => towerSend({ type: "term-data", termId: m.termId, data: d.toString("utf8") });
+  child.stdout.on("data", onData);
+  child.stderr.on("data", onData);
+  child.on("close", () => { terms.delete(m.termId); towerSend({ type: "term-exit", termId: m.termId }); });
+  child.on("error", () => { terms.delete(m.termId); towerSend({ type: "term-exit", termId: m.termId, error: "terminal failed" }); });
+  log(`term open ${m.termId} (${m.session}) @ ${cwd}`);
+}
+function termKill(termId) {
+  const c = terms.get(termId);
+  if (!c) return;
+  terms.delete(termId);
+  try { c.kill("SIGHUP"); } catch (_) {}
+  setTimeout(() => { try { c.kill("SIGKILL"); } catch (_) {} }, 3000);
+}
+
+// ---------- git ops (rooted at the session's effective cwd) ----------
+function gitOp(cmd) {
+  const res = { type: "fs-res", reqId: cmd.reqId, ok: true };
+  let root;
+  try { root = effectiveCwd(cmd.session, cmd.cwd).cwd; }
+  catch (e) { res.ok = false; res.error = e.message; towerSend(res); return; }
+  const send = () => towerSend(res);
+  const git = (args, cb) => execFile("git", args, { cwd: root, maxBuffer: 8 * 1024 * 1024, timeout: 20000 }, cb);
+  const sub = String(cmd.sub || "");
+  if (sub === "status") {
+    git(["status", "--porcelain=v1", "-uall"], (e, out, err) => {
+      if (e) { res.ok = false; res.error = String(err || e.message).slice(0, 300); return send(); }
+      res.text = out.toString().slice(0, 100000); send();
+    });
+  } else if (sub === "head") {
+    // the file's content at HEAD ("" for files git doesn't know yet)
+    let rel;
+    try { rel = path.relative(root, fsSafe(cmd.session, cmd.cwd, cmd.rel)) || "."; }
+    catch (e) { res.ok = false; res.error = e.message; return send(); }
+    git(["show", "HEAD:" + rel.split(path.sep).join("/")], (e, out) => {
+      res.text = e ? "" : out.toString().slice(0, 512 * 1024); send();
+    });
+  } else if (sub === "log") {
+    git(["log", "--graph", "--format=%h\x1f%s\x1f%cr\x1f%D", "-n", "150"], (e, out, err) => {
+      if (e) { res.ok = false; res.error = String(err || e.message).slice(0, 300); return send(); }
+      res.text = out.toString().slice(0, 200000); send();
+    });
+  } else if (sub === "show" && /^[0-9a-f]{4,40}$/i.test(String(cmd.hash || ""))) {
+    // -m --first-parent: merge commits show their diff vs first parent (plain `show` prints none)
+    git(["show", "-m", "--first-parent", "--stat", "--patch", "--format=%h %s%n%an · %ar", String(cmd.hash)], (e, out, err) => {
+      if (e) { res.ok = false; res.error = String(err || e.message).slice(0, 300); return send(); }
+      let t = out.toString();
+      if (t.length > 300000) t = t.slice(0, 300000) + "\n… [truncated]";
+      res.text = t; send();
+    });
+  } else { res.ok = false; res.error = "unknown git op"; send(); }
+}
+
 // ---------- fs ops (rooted at the session's effective cwd) ----------
 const IMG_EXT = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", ico: "image/x-icon" };
 function fsSafe(id, cwdRaw, rel) {
@@ -325,6 +409,7 @@ function fsSafe(id, cwdRaw, rel) {
   return p;
 }
 function fsOp(cmd) {
+  if (cmd.op === "git") { gitOp(cmd); return; } // async — sends its own fs-res
   const res = { type: "fs-res", reqId: cmd.reqId, ok: true };
   try {
     if (cmd.op === "list") {
@@ -399,6 +484,12 @@ function connect() {
     if (m.type === "run" && m.session && m.meta) { run(m); return; }
     if (m.type === "interrupt" && m.session) { interrupt(m.session); return; }
     if (m.type === "fs" && m.reqId) { fsOp(m); return; }
+    if (m.type === "term" && m.termId) {
+      if (m.action === "open") termOpen(m);
+      else if (m.action === "in") { const c = terms.get(m.termId); if (c) { try { c.stdin.write(String(m.data || "")); } catch (_) {} } }
+      else if (m.action === "kill") termKill(m.termId);
+      return;
+    }
     if (m.type === "auth-failed") { log("tower rejected the pass — check AIRPORT_PASS"); }
   });
   ws.addEventListener("close", () => {

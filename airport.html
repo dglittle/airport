@@ -139,6 +139,35 @@
   .fvimg{ max-width:100%; }
   .fvnote{ color:var(--dim); font-size:12px; padding:20px 0; text-align:center; }
 
+  /* ---------- terminal column ---------- */
+  #termwrap{ flex:1 1 auto; min-height:0; display:none; padding:6px 8px; background:#0e1729; }
+  #termwrap.on{ display:block; }
+  #termhost{ width:100%; height:100%; }
+  #termhost .xterm{ height:100%; }
+  header #termbtn.act{ border-color:var(--accent); color:var(--accent); }
+
+  /* ---------- git panel + diff ---------- */
+  .gitsec{ padding:10px 6px 4px; color:var(--dim); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
+  .gitf{ display:flex; gap:6px; padding:3px 6px; border-radius:6px; cursor:pointer; color:var(--muted); align-items:center; white-space:nowrap; }
+  .gitf:hover{ background:var(--panel2); }
+  .gitf.sel{ background:var(--panel2); color:var(--ink); box-shadow:inset 2px 0 0 var(--accent); }
+  .gitf .gst{ width:16px; flex:0 0 auto; font-weight:700; text-align:center; }
+  .gitf .gp{ overflow:hidden; text-overflow:ellipsis; }
+  .gst.m{ color:var(--run); } .gst.a{ color:var(--hot); } .gst.d{ color:var(--bad); } .gst.r{ color:var(--new); }
+  .gitc{ display:flex; gap:5px; padding:1px 6px; cursor:pointer; align-items:baseline; color:var(--muted); font:11px ui-monospace,Menlo,monospace; }
+  .gitc:hover{ background:var(--panel2); }
+  .gitc .glyph{ white-space:pre; color:var(--dim); flex:0 0 auto; }
+  .gitc .gdot{ color:var(--accent); }
+  .gitc .gmsg{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
+  .gitc .gdeco{ color:var(--new); }
+  .gitc .gwhen{ color:var(--dim); flex:0 0 auto; margin-left:auto; padding-left:6px; }
+  .gitempty{ color:var(--dim); padding:4px 6px; font-size:11px; }
+  .dpatch{ margin:0; font:11.5px/1.45 ui-monospace,Menlo,monospace; white-space:pre; color:var(--muted); }
+  .dpatch .dadd{ color:#7ee2a8; background:rgba(79,227,168,.07); display:block; }
+  .dpatch .ddel{ color:#ff9c8a; background:rgba(255,107,94,.07); display:block; }
+  .dpatch .dhunk{ color:var(--accent); display:block; margin-top:6px; }
+  .dpatch .dfile{ color:var(--ink); font-weight:700; display:block; margin-top:10px; }
+
   /* ---------- overlay (create / server / gate) ---------- */
   .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:200; display:flex; align-items:center; justify-content:center; padding:18px; }
   .sheet{ background:var(--panel); border:1px solid var(--rule); border-radius:16px; padding:16px; width:min(420px,100%); max-height:85vh; overflow-y:auto; }
@@ -331,6 +360,7 @@
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
     <span id="gauge"></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span></span>
+    <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
     <button id="gear">⚙</button>
   </header>
@@ -341,6 +371,7 @@
     <div id="explorer"></div>
     <div id="fileview"></div>
     <div id="claudecol">
+      <div id="termwrap"><div id="termhost"></div></div>
       <div id="feed"></div>
       <div id="jumps"><button id="fold" title="fold / unfold everything">⊟</button><button id="jumptop" title="to the top">↑</button><button id="jumpbot" title="to the bottom">↓</button></div>
       <footer id="composer">
@@ -544,9 +575,17 @@ function connect(){
     if (m.type === "auth-failed") { gated = true; try { ws.close(); } catch(_){} renderGate(); return; }
     if (m.type === "run-failed") { hint("✗ " + (m.error || "run failed")); render(); return; }
     if (m.type === "fs-res") { const cb = fsReqs.get(m.reqId); fsReqs.delete(m.reqId); if (cb) cb(m); return; }
+    if (m.type === "term-data") { if (term && m.termId === termId) term.write(m.data); return; }
+    if (m.type === "term-exit") {
+      if (term && m.termId === termId) term.write("\r\n\x1b[90m[terminal closed" + (m.error ? ": " + m.error : "") + "]\x1b[0m\r\n");
+      if (m.termId === termId) termId = null;
+      return;
+    }
   };
   ws.onclose = () => {
     if (gated) return;
+    // the tower reaps our PTYs when the socket dies — reflect that here
+    if (termId) { termId = null; if (term) term.write("\r\n\x1b[90m[connection lost — hit >_ twice to reopen]\x1b[0m\r\n"); }
     setStat("bad", "reconnecting…");
     setTimeout(connect, reconnectDelay = Math.min(15000, reconnectDelay * 1.5));
   };
@@ -585,6 +624,7 @@ $("back").addEventListener("click", () => closeSession());
 $("gear").addEventListener("click", () => serverSheet());
 
 function openSession(id){
+  if (view !== id) closeTerm();
   view = id; editing = null; confirming = null;
   placePut(p => { p.plane = id; });
   patch({ sessions: { [id]: { seenAt: Date.now() } } });
@@ -596,6 +636,7 @@ function openSession(id){
 }
 function closeSession(){
   if (view && exp[view] && exp[view].editing && !closeEditor()) return;  // unsaved file edit — user kept it
+  closeTerm();
   placePut(p => { p.plane = null; });
   if (view) patch({ sessions: { [view]: { seenAt: Date.now() } } });
   stopModeSafe();
@@ -642,7 +683,9 @@ const DISC = 0.125;            // disc side as a fraction of the apron side
 let APRON_S = 300;             // the apron's set side. Drag math MUST use this, not
                                // clientWidth (which excludes the border → release jump)
 function renderTarmac(){
+  if (termOn || term) closeTerm();
   $("back").style.display = "none";
+  $("termbtn").style.display = "none";
   $("hdr-title").textContent = "✈ airport";
   const hh = hosts(), up = Object.keys(hh).filter(hostUp);
   $("hdr-sub").textContent = up.length ? "airfields up: " + up.join(", ") : "no ground crew online";
@@ -1095,8 +1138,12 @@ function renderSession(){
   const lb = $("laybtn");
   lb.style.display = "block";
   lb.textContent = wide ? "▭" : "▦";
-  feedEl.classList.add("on");
-  composer.classList.add("on");
+  const tb = $("termbtn");
+  tb.style.display = "block";
+  tb.classList.toggle("act", termOn);
+  $("termwrap").classList.toggle("on", termOn);
+  feedEl.classList.toggle("on", !termOn);
+  composer.classList.toggle("on", !termOn);
   if (wide) {
     if (!exp[view]) { lastRunSeen[view] = s.lastRunEndedAt || 0; colsFor = view; renderExplorer(); renderFileView(); }
     else if (colsFor !== view) { colsFor = view; lastRunSeen[view] = s.lastRunEndedAt || 0; refreshFs(); }  // columns still show another plane
@@ -1434,6 +1481,59 @@ box.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); $("runbtn").click(); }
 });
 
+// ---------- terminal (xterm.js from CDN; PTY on the session's machine) ----------
+const XTERM_CDN = "https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0";
+const FIT_CDN = "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0";
+let xtermP = null, termOn = false, term = null, termFit = null, termId = null;
+function loadXterm(){
+  if (xtermP) return xtermP;
+  // fetch + eval with define/module/exports shadowed: monaco's AMD loader owns
+  // window.define, and a <script> tag would make xterm's UMD register there
+  // (anonymously — it throws) instead of putting Terminal on window
+  const grab = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("xterm cdn unreachable");
+    new Function("define", "module", "exports", await r.text()).call(window);
+  };
+  xtermP = (async () => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = XTERM_CDN + "/css/xterm.min.css";
+    document.head.appendChild(css);
+    await grab(XTERM_CDN + "/lib/xterm.min.js");
+    await grab(FIT_CDN + "/lib/addon-fit.min.js");
+  })().catch((e) => { xtermP = null; throw e; });
+  return xtermP;
+}
+async function openTerm(){
+  try { await loadXterm(); } catch (e) { hint("terminal: " + e.message); termOn = false; renderSession(); return; }
+  if (!termOn || !view) return;
+  $("termhost").innerHTML = "";
+  term = new Terminal({ fontSize: 13, cursorBlink: true, scrollback: 5000, theme: { background: "#0e1729", cursor: "#e8a13c" } });
+  termFit = new FitAddon.FitAddon();
+  term.loadAddon(termFit);
+  term.open($("termhost"));
+  try { termFit.fit(); } catch (_) {}
+  termId = Math.random().toString(36).slice(2, 12);
+  send({ type: "term", termId, action: "open", session: view, cols: term.cols, rows: term.rows });
+  term.onData((d) => { if (termId) send({ type: "term", termId, action: "in", data: d }); });
+  term.focus();
+}
+function closeTerm(){
+  if (termId) { send({ type: "term", termId, action: "kill" }); termId = null; }
+  if (term) { try { term.dispose(); } catch (_) {} term = null; termFit = null; }
+  termOn = false;
+  const tw = $("termwrap");
+  if (tw) tw.classList.remove("on");
+}
+window.addEventListener("resize", () => { if (term && termFit) { try { termFit.fit(); } catch (_) {} } });
+$("termbtn").addEventListener("click", () => {
+  if (!view) return;
+  if (termOn) { closeTerm(); renderSession(); return; }
+  termOn = true;
+  renderSession();
+  openTerm();
+});
+
 // ---------- layout: 1-col vs 3-col (explorer | file | claude) ----------
 const LS_LAYOUT = "airportLayout_v1";
 let layoutOverride = localStorage.getItem(LS_LAYOUT) || null; // "wide" | "narrow" | null = auto by aspect
@@ -1497,7 +1597,8 @@ async function loadDir(rel){
 function renderExplorer(){
   if (!view || !wideMode()) return;
   const st = expState(), s = sess(view);
-  let html = `<div class="exphead"><span>${esc((s.cwd || "hangar").split("/").pop())}</span><button id="expnew" title="new file">＋</button><button id="expref" title="refresh">↻</button></div>`;
+  if (st.gitMode) return renderGitPanel();
+  let html = `<div class="exphead"><span>${esc((s.cwd || "hangar").split("/").pop())}</span><button id="expgit" title="git view">⎇</button><button id="expnew" title="new file">＋</button><button id="expref" title="refresh">↻</button></div>`;
   const walk = (rel, depth) => {
     const entries = st.cache[rel];
     if (!entries || entries === "loading") { html += `<div class="expempty" style="padding-left:${8 + depth * 14}px">…</div>`; if (!entries) loadDir(rel); return; }
@@ -1526,6 +1627,128 @@ function renderExplorer(){
   if (rb) rb.addEventListener("click", () => refreshFs());
   const nb = ex.querySelector("#expnew");
   if (nb) nb.addEventListener("click", newFile);
+  const gb = ex.querySelector("#expgit");
+  if (gb) gb.addEventListener("click", () => { st.gitMode = true; loadGit(); });
+}
+
+// ---------- git panel (⎇): changed files + commit graph ----------
+async function loadGit(){
+  const st = expState();
+  st.gitStatus = null; st.gitLog = null;
+  renderGitPanel();
+  const [stt, lg] = await Promise.all([fsRaw("git", "", { sub: "status" }), fsRaw("git", "", { sub: "log" })]);
+  if (!view || !expState().gitMode) return;
+  expState().gitStatus = stt; expState().gitLog = lg;
+  renderGitPanel();
+}
+function parseStatus(text){
+  return (text || "").split("\n").filter(l => l.length > 3).map((l) => {
+    const code = l.slice(0, 2), rest = l.slice(3);
+    const path = rest.includes(" -> ") ? rest.split(" -> ").pop() : rest;
+    return { code, path: path.replace(/^"|"$/g, "") };
+  });
+}
+function stCls(code){
+  if (code.includes("?") || code.includes("A")) return "a";
+  if (code.includes("D")) return "d";
+  if (code.includes("R")) return "r";
+  return "m";
+}
+function gitLogHtml(raw){
+  return (raw || "").split("\n").filter(l => l.trim()).map((line) => {
+    const fsep = line.indexOf("\x1f");
+    if (fsep < 0) return `<div class="gitc"><span class="glyph">${esc(line)}</span></div>`; // connector-only row
+    const head = line.slice(0, fsep);
+    const sp = head.lastIndexOf(" ");
+    const hash = head.slice(sp + 1);
+    const glyph = esc(head.slice(0, sp + 1)).replace(/\*/g, '<span class="gdot">●</span>');
+    const f = line.slice(fsep + 1).split("\x1f"); // [subject, reltime, decorations]
+    const deco = (f[2] || "").trim();
+    return `<div class="gitc" data-gh="${esc(hash)}" title="${esc(hash)}"><span class="glyph">${glyph}</span><span class="gmsg">${esc(f[0] || "")}${deco ? ` <span class="gdeco">${esc(deco)}</span>` : ""}</span><span class="gwhen">${esc(f[1] || "")}</span></div>`;
+  }).join("");
+}
+function renderGitPanel(){
+  if (!view || !wideMode()) return;
+  const st = expState();
+  const ex = $("explorer");
+  let html = `<div class="exphead"><span>⎇ git</span><button id="gfiles" title="file explorer">📁</button><button id="gref" title="refresh">↻</button></div>`;
+  if (st.gitStatus == null) html += `<div class="gitempty">…</div>`;
+  else if (!st.gitStatus.ok) html += `<div class="gitempty">✗ ${esc(st.gitStatus.error || "not a git repo?")}</div>`;
+  else {
+    const entries = parseStatus(st.gitStatus.text);
+    html += `<div class="gitsec">changes (${entries.length})</div>`;
+    html += entries.length
+      ? entries.map((e) => `<div class="gitf${st.dview && st.dview.title === e.path ? " sel" : ""}" data-gf="${esc(e.path)}"><span class="gst ${stCls(e.code)}">${esc(e.code.trim() || "M")}</span><span class="gp">${esc(e.path)}</span></div>`).join("")
+      : `<div class="gitempty">clean — nothing changed</div>`;
+    html += `<div class="gitsec">commits</div>`;
+    html += st.gitLog && st.gitLog.ok ? gitLogHtml(st.gitLog.text) : `<div class="gitempty">${st.gitLog ? "✗ " + esc(st.gitLog.error || "") : "…"}</div>`;
+  }
+  ex.innerHTML = html;
+  const fb = ex.querySelector("#gfiles");
+  if (fb) fb.addEventListener("click", () => { st.gitMode = false; st.dview = null; destroyDiff(); renderExplorer(); renderFileView(); });
+  const rb = ex.querySelector("#gref");
+  if (rb) rb.addEventListener("click", loadGit);
+  ex.querySelectorAll("[data-gf]").forEach((el) => el.addEventListener("click", () => openGitDiff(el.dataset.gf)));
+  ex.querySelectorAll("[data-gh]").forEach((el) => el.addEventListener("click", () => openGitCommit(el.dataset.gh)));
+}
+async function openGitDiff(rel){
+  const st = expState();
+  if (st.editing && !closeEditor()) return;
+  st.dview = { kind: "file", title: rel, loading: true }; st.sel = null;
+  renderGitPanel(); renderFileView();
+  const [head, work] = await Promise.all([fsRaw("git", rel, { sub: "head" }), fsRaw("read", rel)]);
+  if (!view || !expState().dview || expState().dview.title !== rel) return;
+  expState().dview = { kind: "file", title: rel,
+    orig: head.ok ? (head.text || "") : "",
+    mod: (work.ok && !work.binary) ? (work.text || "") : "" };
+  renderFileView();
+}
+async function openGitCommit(hash){
+  const st = expState();
+  if (st.editing && !closeEditor()) return;
+  st.dview = { kind: "commit", title: hash, loading: true }; st.sel = null;
+  renderFileView();
+  const r = await fsRaw("git", "", { sub: "show", hash });
+  if (!view || !expState().dview || expState().dview.title !== hash) return;
+  expState().dview = { kind: "commit", title: hash, patch: r.ok ? r.text : "✗ " + (r.error || "failed") };
+  renderFileView();
+}
+function patchHtml(text){
+  return (text || "").split("\n").map((l) => {
+    const e = esc(l);
+    if (/^(diff --git|commit |index )/.test(l)) return `<span class="dfile">${e}</span>`;
+    if (l.startsWith("@@")) return `<span class="dhunk">${e}</span>`;
+    if (l.startsWith("+") && !l.startsWith("+++")) return `<span class="dadd">${e}</span>`;
+    if (l.startsWith("-") && !l.startsWith("---")) return `<span class="ddel">${e}</span>`;
+    return e + "\n";
+  }).join("");
+}
+// monaco side-by-side diff (the diff2 look)
+let diffEd = null, diffUid = 0;
+function destroyDiff(){
+  if (!diffEd) return;
+  const m = diffEd.getModel();
+  try { diffEd.dispose(); } catch (_) {}
+  if (m) { try { m.original.dispose(); m.modified.dispose(); } catch (_) {} }
+  diffEd = null;
+}
+async function mountDiff(dv){
+  let monaco;
+  try { monaco = await loadMonaco(); }
+  catch (e) { const el = $("dhost"); if (el) el.textContent = "✗ " + e.message; return; }
+  const el = $("dhost");
+  if (!el || !view || expState().dview !== dv) return;
+  destroyDiff();
+  el.textContent = "";
+  diffEd = monaco.editor.createDiffEditor(el, {
+    theme: "vs-dark", readOnly: true, automaticLayout: true, renderSideBySide: true,
+    minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false,
+  });
+  const uid = ++diffUid;
+  diffEd.setModel({
+    original: monaco.editor.createModel(dv.orig || "", undefined, monaco.Uri.parse("inmemory://git/" + uid + "/a/" + dv.title)),
+    modified: monaco.editor.createModel(dv.mod || "", undefined, monaco.Uri.parse("inmemory://git/" + uid + "/b/" + dv.title)),
+  });
 }
 async function openFile(rel, edit){
   const st = expState();
@@ -1561,6 +1784,22 @@ function renderFileView(){
   if (!view || !wideMode()) return;
   const st = expState(), fv = $("fileview");
   if (fvEd && !st.editing) destroyEditor();  // stale editor after a plane switch
+  if (diffEd && !st.dview) destroyDiff();
+  if (st.dview) {
+    const dv = st.dview;
+    fv.innerHTML = `
+      <div class="fvhead"><span class="fvpath">⎇ ${esc(dv.title)}</span><span class="fvsize"></span><button id="dclose" title="close diff">×</button></div>
+      <div class="fvbody${dv.kind === "file" ? " fvedit" : ""}">${
+        dv.loading ? (dv.kind === "file" ? `<div class="fveditor" id="dhost">loading…</div>` : `<div class="fvnote">loading…</div>`)
+        : dv.kind === "file" ? `<div class="fveditor" id="dhost"></div>`
+        : `<pre class="dpatch">${patchHtml(dv.patch)}</pre>`}</div>`;
+    fv.querySelector("#dclose").addEventListener("click", () => {
+      st.dview = null; destroyDiff(); renderFileView();
+      if (st.gitMode) renderGitPanel();
+    });
+    if (dv.kind === "file" && !dv.loading) mountDiff(dv);
+    return;
+  }
   if (!st.sel) { fv.innerHTML = `<div class="fvnote">pick a file on the left — it shows here</div>`; return; }
   const d = st.selData;
   if (st.editing && d) {
@@ -1698,6 +1937,7 @@ function refreshFs(){  // after a run or plane switch: relist everything open, r
   if (!view || !wideMode()) return;
   const st = expState();
   st.cache = {};
+  if (st.gitMode) { loadGit(); renderFileView(); return; }
   renderExplorer();
   if (st.editing) return;                 // never clobber an open editor
   if (st.sel) openFile(st.sel);

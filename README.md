@@ -83,6 +83,15 @@ since you last looked, dimmed = its machine is offline.
 - **File columns.** In landscape, each session gets explorer + file viewer
   columns rooted at its cwd (relayed tower→daemon), with a monaco editor and
   unsaved-edit drafts. Small images preview inline (base64 through the relay).
+- **⎇ git view.** The explorer header's ⎇ flips the file column to git: the
+  changed files (click one = monaco diff of HEAD vs working tree in the file
+  view), then every commit with a VS-Code-style graph gutter (click one = its
+  patch). 📁 flips back to files.
+- **>_ terminal.** Inside a session, the header's `>_` swaps the feed for a
+  live terminal on the session's machine, opened at its cwd. Real PTY via
+  python3's pty module — macOS `script(1)` can't take node's socketpair stdio
+  (util-linux `script -qfc` is the no-python fallback on linux). The tower
+  reaps PTYs when the browser disconnects or the plane is closed.
 - **Context checkboxes** (in the flight plan; all live-verified on claude
   2.1.207 — any change = cold cache next run):
   - **CLAUDE.md** (default OFF): adds the `project` setting source
@@ -237,7 +246,9 @@ The doc:
 - Transcript synthesis uses Claude Code's **internal** jsonl format
   ([SYNTHETIC.md](SYNTHETIC.md)) — a CLI update can break it; re-verify on
   upgrades (last verified 2.1.198–2.1.207).
-- The monaco editor loads from a CDN (needs internet in the browser).
+- The monaco editor and the terminal's xterm.js load from CDNs (needs internet
+  in the browser). xterm is fetched + eval'd with `define` shadowed so its UMD
+  build doesn't register into monaco's AMD loader.
 - One daemon per machine name; a second connection with the same name
   supersedes the first.
 - No remirror endpoint yet (corral had one): if a registered session keeps
