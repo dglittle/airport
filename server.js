@@ -493,10 +493,13 @@ wss.on("connection", (ws) => {
       const patch = { running: false, state: "ready", lastRunEndedAt: Date.now(),
         turns: (s.turns || 0) + 1, dirty: !!(s.dirty && !m.synthed), messages: sweep };
       if (m.trimConsumed) patch.trim = null;
-      // explicit false = the CLI ran without consuming it (zap landed mid-flight;
-      // the transcript grew past the cut) — rebuild next ⚡. Early bounces
-      // (cap busy, cwd error) omit the field and keep the trim pending.
-      else if (s.trim && m.trimConsumed === false) { patch.trim = null; patch.dirty = true; }
+      // any completed run that didn't consume the trim may have grown the
+      // transcript past the cut (zap landed mid-flight, or an old daemon that
+      // doesn't know trim) — a stale cut would eat newer turns, so rebuild
+      // instead. Failed runs keep the trim: the early bounces (cap busy, cwd
+      // error) never touched the CLI, and new daemons report consumption
+      // explicitly even for failures.
+      else if (s.trim && !m.failed) { patch.trim = null; patch.dirty = true; }
       if (m.claudeSessionId) { patch.claudeSessionId = m.claudeSessionId; patch.sidHost = m.sidHost || s.host; }
       // a successful fork turn consumed forkNext (the daemon reported the NEW sid);
       // a failed one keeps it so the next ⚡ re-attempts the branch (never appends to the parent)
