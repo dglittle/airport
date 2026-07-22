@@ -61,6 +61,7 @@
     -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent;
     transition:border-color .2s, box-shadow .2s;
   }
+  .plane.note{ border-style:dashed; }
   .plane.hot{ border-color:var(--hot); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
   .plane.running{ border-color:var(--run); box-shadow:0 0 calc(var(--S)*0.035) rgba(255,196,107,.45); animation:pulse 1.1s infinite; }
   .plane.offline{ opacity:.45; }
@@ -145,6 +146,18 @@
   #termhost{ width:100%; height:100%; }
   #termhost .xterm{ height:100%; }
   header #termbtn.act{ border-color:var(--accent); color:var(--accent); }
+
+  /* ---------- 📝 note planes (a text file living in the shelf) ---------- */
+  #notewrap{ flex:1 1 auto; min-height:0; display:none; flex-direction:column; }
+  #notewrap.on{ display:flex; }
+  #notehead{ display:flex; gap:7px; align-items:center; padding:8px 10px; border-bottom:1px solid var(--rule); }
+  #notehead input{ background:var(--panel2); border:1px solid var(--rule); border-radius:8px; color:var(--ink); padding:5px 8px; font:600 13px -apple-system,sans-serif; min-width:0; }
+  #nh-title{ flex:1; }
+  #nh-emoji{ width:46px; text-align:center; }
+  #notehead button{ background:none; border:1px solid var(--rule); border-radius:8px; color:var(--muted); font-size:12px; padding:5px 9px; cursor:pointer; -webkit-tap-highlight-color:transparent; white-space:nowrap; }
+  #notehead button.danger{ color:var(--bad); border-color:rgba(255,107,94,.4); }
+  #notehost{ flex:1; min-height:0; }
+  #notehost textarea{ width:100%; height:100%; background:var(--panel); color:var(--ink); border:none; outline:none; resize:none; padding:12px; font:14px/1.5 ui-monospace,Menlo,monospace; }
 
   /* ---------- git panel + diff ---------- */
   .gitsec{ padding:10px 6px 4px; color:var(--dim); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
@@ -389,6 +402,7 @@
     <div id="fileview"></div>
     <div id="claudecol">
       <div id="termwrap"><div id="termhost"></div></div>
+      <div id="notewrap"><div id="notehead"></div><div id="notehost"></div></div>
       <div id="feed"></div>
       <div id="jumps"><button id="fold" title="fold / unfold everything">⊟</button><button id="jumptop" title="to the top">↑</button><button id="jumpbot" title="to the bottom">↓</button></div>
       <footer id="composer">
@@ -558,7 +572,10 @@ function fmtFly(ms){
 }
 // ^ MUST return a real boolean: classList.toggle(cls, undefined) is a FLIP, not "off" —
 // undefined leaked here and made never-flown planes blink green on render parity (7/18)
-function isUnread(s){ return !s.running && s.lastRunEndedAt && s.lastRunEndedAt > (s.seenAt || 0); }
+function isUnread(s){
+  if (s.kind === "note") return (s.editedAt || 0) > (s.seenAt || 0);  // edited on another device
+  return !s.running && s.lastRunEndedAt && s.lastRunEndedAt > (s.seenAt || 0);
+}
 function hint(t){ $("hintline").textContent = t || ""; }
 const PLANES = ["🛩","✈️","🛫","🛬","🚁","🛸","🚀","🎈"];
 function emojiFor(id, s){ if (s.emoji) return s.emoji; let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PLANES[h % PLANES.length]; }
@@ -656,6 +673,7 @@ function openSession(id){
 function closeSession(){
   if (view && exp[view] && exp[view].editing && !closeEditor()) return;  // unsaved file edit — user kept it
   closeTerm();
+  flushNote();  // pending note autosave lands before seenAt, so no false unread dot
   placePut(p => { p.plane = null; });
   if (view) patch({ sessions: { [view]: { seenAt: Date.now() } } });
   stopModeSafe();
@@ -703,6 +721,7 @@ let APRON_S = 300;             // the apron's set side. Drag math MUST use this,
                                // clientWidth (which excludes the border → release jump)
 function renderTarmac(){
   if (termOn || term) closeTerm();
+  if (noteEd) destroyNote();
   $("back").style.display = "none";
   $("termbtn").style.display = "none";
   $("hdr-title").textContent = "✈ airport";
@@ -739,9 +758,11 @@ function renderTarmac(){
       wirePlane(el);
       apron.appendChild(el);
     }
-    el.classList.toggle("running", !!s.running);
-    el.classList.toggle("hot", !s.running && isHot(s));
-    el.classList.toggle("offline", s.state === "offline");
+    const isNote = s.kind === "note";
+    el.classList.toggle("note", isNote);
+    el.classList.toggle("running", !isNote && !!s.running);
+    el.classList.toggle("hot", !isNote && !s.running && isHot(s));
+    el.classList.toggle("offline", !isNote && s.state === "offline");
     el.title = s.title || id;
     if (dragState?.id !== id) {
       const x = clampX(typeof s.x === "number" ? s.x : 0.5);
@@ -753,11 +774,14 @@ function renderTarmac(){
         ? `<span class="runm">✈${fmtFly(Date.now() - (s.startedAt || Date.now()))}</span>`
         : isHot(s) ? `<span class="hotm">${ago(s.lastRunEndedAt)}</span>` // green tint + ring = hot; no word needed
         : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
+      const metaLine = isNote
+        ? `<span class="hostm">note</span>·${s.editedAt ? ago(s.editedAt) : "new"}`
+        : `<span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>·${fmtTok(s.totalTokens)}·${meta}`;
       el.innerHTML = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
         <div class="emoji">${esc(emojiFor(id, s))}</div>
         <div class="name">${esc(s.title || id)}</div>
-        <div class="meta"><span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>·${fmtTok(s.totalTokens)}·${meta}</div>`;
+        <div class="meta">${metaLine}</div>`;
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
@@ -812,7 +836,7 @@ $("addplane").addEventListener("click", (e) => {
     <label>cwd (working directory)</label><input id="f-cwd" placeholder="" autocomplete="off">
     <label>model</label>
     <select id="f-model">${MODELS.map(m => `<option value="${m}">${m.replace("claude-","")}</option>`).join("")}</select>
-    <div class="btns"><button data-x>cancel</button><button class="go" id="f-go">roll out 🛩</button></div>
+    <div class="btns"><button data-x>cancel</button><button id="f-note" title="a text file on the tarmac — lives in the shelf, no machine, no model">📝 note</button><button class="go" id="f-go">roll out 🛩</button></div>
     <div class="hint" id="f-err"></div>`,
   (ov) => {
     const cwdHint = () => {
@@ -822,6 +846,19 @@ $("addplane").addEventListener("click", (e) => {
     };
     cwdHint();
     ov.querySelector("#f-host").addEventListener("change", cwdHint);
+    ov.querySelector("#f-note").addEventListener("click", () => {
+      const name = ov.querySelector("#f-name").value.trim();
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(id)) { ov.querySelector("#f-err").textContent = "name needs letters/numbers"; return; }
+      if (sessions()[id]) { ov.querySelector("#f-err").textContent = "taken"; return; }
+      patch({ sessions: { [id]: {
+        kind: "note", title: name, emoji: "📝", text: "",
+        x: Math.random()*0.7 + 0.15, y: Math.random()*0.6 + 0.15,
+        createdAt: Date.now(), editedAt: Date.now(),
+      } } });
+      ov.remove();
+      openSession(id);
+    });
     ov.querySelector("#f-go").addEventListener("click", () => {
       const name = ov.querySelector("#f-name").value.trim();
       const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
@@ -1147,6 +1184,9 @@ function turnHtml(b, i, len){
 function renderSession(){
   const s = sess(view);
   if (!s || !Object.keys(s).length) { view = null; return renderTarmac(); }
+  if (s.kind === "note") return renderNote(s);
+  if (noteEd) destroyNote();          // switched from a note to a real plane
+  $("jumps").style.display = "";
   $("back").style.display = "block";
   $("hdr-title").textContent = (s.emoji || emojiFor(view, s)) + " " + (s.title || view);
   const hot = s.running ? "flying" : isHot(s) ? `hot ${ago(s.lastRunEndedAt)}` : "cold";
@@ -1183,6 +1223,112 @@ function renderSession(){
   reconcileFeed(msgs, s, boxes);
   if (stick) feedEl.scrollTop = feedEl.scrollHeight;
   updateJumps();
+}
+
+// ---------- 📝 note planes: a shelf-stored text file, edited in monaco ----------
+let noteEd = null, noteFor = null, noteSynced = "", noteTimer = null, noteConfirm = false;
+function noteSave(){
+  if (!noteEd || !noteFor) return;
+  const v = noteEd.getValue();
+  if (v === noteSynced) return;
+  noteSynced = v;
+  patch({ sessions: { [noteFor]: { text: v, editedAt: Date.now() } } });
+}
+function flushNote(){ clearTimeout(noteTimer); noteTimer = null; noteSave(); }
+function destroyNote(){
+  flushNote();
+  if (noteEd) { const m = noteEd.getModel && noteEd.getModel(); try { noteEd.dispose(); } catch (_) {} if (m) { try { m.dispose(); } catch (_) {} } }
+  noteEd = null; noteFor = null; noteSynced = ""; noteConfirm = false;
+  const nw = $("notewrap");
+  if (nw) nw.classList.remove("on");
+}
+function renderNote(s){
+  $("back").style.display = "block";
+  $("hdr-title").textContent = (s.emoji || "📝") + " " + (s.title || view);
+  const len = (s.text || "").length;
+  $("hdr-sub").textContent = "note · " + (len ? s.text.split("\n").length + " lines · " + len + " chars" : "empty")
+    + (s.editedAt ? " · " + ago(s.editedAt) : "");
+  setStat("ok", "note");
+  tarmacEl.classList.remove("on");
+  colsEl.classList.add("on");
+  colsEl.classList.remove("wide");
+  $("laybtn").style.display = "none";
+  $("termbtn").style.display = "none";
+  $("termwrap").classList.remove("on");
+  feedEl.classList.remove("on");
+  composer.classList.remove("on");
+  $("jumps").style.display = "none";
+  $("notewrap").classList.add("on");
+  if (noteFor !== view) {
+    if (noteEd) destroyNote();
+    $("notewrap").classList.add("on");   // destroyNote hid it
+    noteFor = view; noteSynced = s.text || ""; noteConfirm = false;
+    $("notehead").innerHTML = `
+      <input id="nh-emoji" value="${esc(s.emoji || "📝")}" maxlength="4">
+      <input id="nh-title" value="${esc(s.title || "")}" placeholder="title" autocomplete="off">
+      <span id="nh-del"></span>`;
+    const t = $("nh-title"), em = $("nh-emoji");
+    t.addEventListener("change", () => { if (noteFor) patch({ sessions: { [noteFor]: { title: t.value.trim() } } }); });
+    em.addEventListener("change", () => { if (noteFor) patch({ sessions: { [noteFor]: { emoji: em.value.trim() || "📝" } } }); });
+    renderNoteDel();
+    mountNote(s);
+  } else {
+    // remote changes fold in unless local edits are mid-flight (then local wins at next autosave)
+    if (noteEd && typeof s.text === "string" && s.text !== noteSynced) {
+      if (!noteEd.hasTextFocus() && noteEd.getValue() === noteSynced) { noteEd.setValue(s.text); noteSynced = s.text; }
+      else if (noteEd.getValue() === s.text) noteSynced = s.text;
+    }
+    const t = $("nh-title"), em = $("nh-emoji");
+    if (t && document.activeElement !== t) t.value = s.title || "";
+    if (em && document.activeElement !== em) em.value = s.emoji || "📝";
+  }
+}
+function renderNoteDel(){
+  const d = $("nh-del");
+  if (!d) return;
+  d.innerHTML = noteConfirm
+    ? `<button class="danger" id="nh-delgo">delete note</button><button id="nh-delx">×</button>`
+    : `<button id="nh-delc" title="delete this note">✕</button>`;
+  const c = $("nh-delc"), x = $("nh-delx"), g = $("nh-delgo");
+  if (c) c.addEventListener("click", () => { noteConfirm = true; renderNoteDel(); });
+  if (x) x.addEventListener("click", () => { noteConfirm = false; renderNoteDel(); });
+  if (g) g.addEventListener("click", () => {
+    const id = noteFor;
+    clearTimeout(noteTimer); noteTimer = null;                       // never flush a deleted note back
+    if (noteEd) { try { noteEd.dispose(); } catch (_) {} }
+    noteEd = null; noteFor = null; noteSynced = "";
+    view = null;                                                     // house delete pattern (see #c-del)
+    placePut(p => { p.plane = null; });
+    patch({ sessions: { [id]: null } });
+  });
+}
+const noteAutosave = () => { clearTimeout(noteTimer); noteTimer = setTimeout(noteSave, 600); };
+async function mountNote(s){
+  const host = $("notehost");
+  host.textContent = "…";
+  let monaco = null;
+  try { monaco = await loadMonaco(); } catch (_) {}   // CDN down → textarea fallback below
+  if (noteFor !== view) return;                       // switched away while loading
+  host.textContent = "";
+  if (!monaco) {
+    const ta = document.createElement("textarea");
+    ta.value = s.text || "";
+    host.appendChild(ta);
+    noteEd = { getValue: () => ta.value, setValue: (v) => { ta.value = v; },
+               hasTextFocus: () => document.activeElement === ta, dispose: () => ta.remove(), getModel: () => null };
+    ta.addEventListener("input", noteAutosave);
+    ta.focus();
+    return;
+  }
+  noteEd = monaco.editor.create(host, {
+    value: s.text || "", language: "markdown", theme: "vs-dark",
+    wordWrap: "on", minimap: { enabled: false }, lineNumbers: "off",
+    fontSize: 14, automaticLayout: true, scrollBeyondLastLine: false,
+    folding: false, glyphMargin: false, lineDecorationsWidth: 8,
+    renderLineHighlight: "none", occurrencesHighlight: "off",
+  });
+  noteEd.onDidChangeModelContent(noteAutosave);
+  noteEd.focus();
 }
 
 // ---------- keyed feed reconciliation ----------

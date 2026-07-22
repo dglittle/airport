@@ -55,6 +55,13 @@ Drag to park, tap to board. Badges: amber pulse = flying (turn running), green
 ring = cache-hot (ran within the 1h prompt-cache TTL), purple dot = landed
 since you last looked, dimmed = its machine is offline.
 
+Not every tile is a claude session: **📝 notes** (＋ → "📝 note") are plain
+text files living in the shelf doc itself — no machine, no model, no
+transcript. A note parks on the tarmac like any plane (dashed border), boards
+into a monaco editor (markdown, autosaved as you type, synced to every open
+browser), and gets the purple dot when edited on another device. Good for todo
+lists and scratch pads that should live where the work lives.
+
 ## A session's life
 
 - **Boxes.** The feed is `messages{m000001…}`: `user` / `ai` / `tool` boxes.
@@ -249,6 +256,8 @@ The doc:
 ```js
 { pageVersion, hosts: { mac: { online, lastSeen, roots, sessRoot, defaultModel, … } },
   sessions: { "<id>": {
+    kind,                       // absent = claude session; "note" = a 📝 text file (only title/emoji/x/y/text/editedAt apply)
+    text, editedAt,             // 📝 note content + last-edit stamp
     title, emoji, host, cwd, model, systemPrompt, systemMode, tools,   // the params
     x, y,                       // fractions of the apron square
     indent,                     // current detour depth — new boxes get depth stamped from this

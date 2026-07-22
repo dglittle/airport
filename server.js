@@ -194,6 +194,7 @@ const termOwners = new Map(); // termId -> {ws (browser), hostName}
 function routeRun(id, text, fail) {
   const s = sess(id);
   if (!s) return fail("no such session");
+  if (s.kind === "note") return fail("that's a 📝 note — nothing to fly");
   if (s.running) return fail("already running");
   if (typeof text === "string" && text.trim()) addBox(id, "user", text.trim().slice(0, 64 * 1024));
   const host = hostSocket(s.host);
