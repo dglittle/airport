@@ -1150,11 +1150,11 @@ function renderSession(){
     else if (s.lastRunEndedAt && lastRunSeen[view] !== s.lastRunEndedAt) { lastRunSeen[view] = s.lastRunEndedAt; refreshFs(); }
   }
   const boxes = boxesOf(s);
-  const nearBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 120;
+  const stick = feedAtBottom();  // strictly at the bottom = follow new content; anywhere above = never move
   const msgs = ensureCfg();  // settings panel rides at the top of the same scroll
   syncCfg();                 // pull remote changes into non-focused fields
   reconcileFeed(msgs, s, boxes);
-  if (nearBottom) feedEl.scrollTop = feedEl.scrollHeight;
+  if (stick) feedEl.scrollTop = feedEl.scrollHeight;
   updateJumps();
 }
 
@@ -1546,7 +1546,7 @@ $("laybtn").addEventListener("click", () => {
 
 // ---------- jump arrows: hover when the feed is scrolled away ----------
 const jumpTop = $("jumptop"), jumpBot = $("jumpbot"), foldBtn = $("fold");
-const feedAtBottom = () => feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 80;
+const feedAtBottom = () => feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 1; // <1 = sub-pixel slack only; the ↓ arrow and render-follow share this exact test
 function anyBoxOpen(){
   const boxes = boxesOf(sess(view));
   return boxes.some((b, i) => editing !== b.key && !boxCollapsed(b, i, boxes.length));
