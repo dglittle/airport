@@ -75,6 +75,13 @@ since you last looked, dimmed = its machine is offline.
   resumable transcript (or edited history), it falls back to a mirror fork:
   `dirty` + text-only rebuild. **Delete** removes a session from the doc
   (transcript files stay on disk).
+- **⇥ detours (side questions).** The composer's ⇥ raises the session's
+  `indent`: every new box — yours AND claude's — is stamped with that depth by
+  the tower and renders indented. Ask the tangent, get the answer, then hit ✕
+  on the detour bar to zap the whole indented run in one go (nested detours
+  ride along). Zapping synced boxes sets `dirty`, so the next ⚡ rebuilds the
+  transcript without the tangent — it stops costing context (one cold read,
+  same trade as any edit). ⇤ steps back to the main line *keeping* the boxes.
 - **Flying** (marina's sailing): change the session's *airfield* in its flight
   plan — the next ⚡ rebuilds the transcript on the new machine (one cold read,
   🛬 box). A stored cwd that doesn't fit the target machine's whitelist remaps
@@ -234,10 +241,11 @@ The doc:
   sessions: { "<id>": {
     title, emoji, host, cwd, model, systemPrompt, systemMode, tools,   // the params
     x, y,                       // fractions of the apron square
+    indent,                     // current detour depth — new boxes get depth stamped from this
     state, running, startedAt,  // ready | processing | offline
     claudeSessionId, sidHost, dirty,
     seenAt, lastRunEndedAt, hotUntil, turns, lastCost, lastMs, totalTokens, lastError,
-    messages: { m000001: { role, text, ts, synced, stats } },
+    messages: { m000001: { role, text, ts, synced, stats, depth } },
 } } }
 ```
 

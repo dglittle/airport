@@ -227,6 +227,20 @@
   .chip.ai{ color:var(--ai); border-color:rgba(232,161,60,.35); }
   .chip.user{ color:var(--you); border-color:rgba(74,163,255,.35); }
   .chip.err{ color:var(--bad); border-color:rgba(255,107,94,.4); }
+
+  /* ---------- detours (⇥ indented asides, zappable as a unit) ---------- */
+  .turn.aside, .chip.aside{ border-left:2px solid rgba(232,161,60,.5); }
+  .asidebar{
+    display:flex; align-items:center; gap:7px; margin:2px 0 8px; max-width:820px;
+    color:var(--dim); font:11px ui-monospace,Menlo,monospace; user-select:none; -webkit-user-select:none;
+  }
+  .asidebar .lbl{ color:var(--accent); }
+  .asidebar .dash{ flex:1; border-top:1px dashed var(--rule); }
+  .asidebar button{
+    background:none; border:1px solid var(--rule); border-radius:6px; color:var(--muted);
+    font-size:10px; padding:1px 7px; cursor:pointer; -webkit-tap-highlight-color:transparent;
+  }
+  .asidebar button.danger{ color:var(--bad); border-color:rgba(255,107,94,.4); }
   .turn .when{ color:var(--dim); font-size:10px; font-family:ui-monospace,Menlo,monospace; cursor:pointer; }
   .turn .grow{ flex:1; }
   .turn .bbtn{
@@ -343,6 +357,9 @@
   }
   #dictate,#whisper{ flex:1; }
   #brief{ flex:.45; }
+  #indent,#outdent{ flex:.35; }
+  #indent.act{ border-color:var(--accent); color:var(--accent); }
+  #outdent{ display:none; }
   #addbox{ flex:.8; }
   #dictate.on{ border-color:var(--run); background:linear-gradient(180deg,#3a2d10 0%,#241a08 100%); color:var(--run); }
   #whisper.on{ border-color:var(--bad); background:linear-gradient(180deg,#4a1a14 0%,#2a0e0a 100%); color:#ff9c8a; }
@@ -382,6 +399,8 @@
       <button id="dictate">📱 dictate</button>
       <button id="whisper">☁︎ whisper</button>
       <button id="brief" title="add a box that briefs claude on how airport works">🧭</button>
+      <button id="indent" title="detour — new boxes indent; ✕ on the detour bar zaps them all later">⇥</button>
+      <button id="outdent" title="back to the main line (keeps the detour's boxes)">⇤</button>
       <button id="addbox">＋ box</button>
       <button id="runbtn">⚡ run</button>
     </div>
@@ -969,7 +988,7 @@ function buildCfg(cfg){
     let fid, n = 1;
     do { fid = id + "-f" + n++; } while (sessions()[fid]);
     const copy = {};
-    for (const b of boxesOf(s2)) copy[b.key] = { role: b.role, text: b.text, ts: b.ts, synced: b.synced || null };
+    for (const b of boxesOf(s2)) copy[b.key] = { role: b.role, text: b.text, ts: b.ts, synced: b.synced || null, depth: b.depth || null };
     // REAL fork when the parent is clean: first ⚡ runs `--resume <parent> --fork-session`
     // — full context (tool results + thinking), one cold cache write, parent untouched.
     // Fallback (no sid / edited history): mirror fork — text-only rebuild via dirty.
@@ -1081,11 +1100,14 @@ function chipLabel(b){
   if (/^[◼⟲🛬]/.test(fl)) return fl.slice(0, 18);
   return "→ " + fl.slice(0, 15);  // tool result
 }
+const asideMl = (d) => Math.min(d || 0, 6) * 18;  // px per detour level, capped
 function turnHtml(b, i, len){
   const cls = b.err ? b.role + " err" : b.role;
   const cls2 = b.role === "user" ? "you" : b.role;
+  const d = b.depth || 0;
+  const aside = d ? ` aside" style="margin-left:${asideMl(d)}px` : "";
   if (boxCollapsed(b, i, len))
-    return `<div class="chip ${cls}" data-tgl="${b.key}" title="${esc((b.text || "").slice(0, 300)).replace(/"/g, "&quot;")}">${esc(chipLabel(b))}</div>`;
+    return `<div class="chip ${cls}${aside}" data-tgl="${b.key}" title="${esc((b.text || "").slice(0, 300)).replace(/"/g, "&quot;")}">${esc(chipLabel(b))}</div>`;
   const forced = fmtOverride[view + ":" + b.key];
   const fmt = forced || (b.role === "tool" ? "txt" : guessFmt(b.text || ""));
   let body;
@@ -1109,7 +1131,7 @@ function turnHtml(b, i, len){
       <button class="bbtn" data-ecancel="1">×</button>` : `
       <button class="bbtn" data-confirm="${b.key}">✕</button>`;
   return `
-  <div class="turn ${cls2}${b.err ? " err" : ""}">
+  <div class="turn ${cls2}${b.err ? " err" : ""}${aside}">
     <div class="row1">
       <span class="who" data-tgl="${b.key}">${WHO[b.role] || b.role}${b.synced ? "" : " ·pending"}</span>
       <span class="when" data-tgl="${b.key}" title="${b.ts ? esc(new Date(b.ts).toLocaleString()) : ""}">${fmtT(b.ts)}</span>
@@ -1129,7 +1151,12 @@ function renderSession(){
   $("hdr-title").textContent = (s.emoji || emojiFor(view, s)) + " " + (s.title || view);
   const hot = s.running ? "flying" : isHot(s) ? `hot ${ago(s.lastRunEndedAt)}` : "cold";
   const off = !hostUp(s.host);
-  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}`;
+  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}${(Number(s.indent) || 0) ? " · ⇥" + s.indent : ""}`;
+  const ind = Number(s.indent) || 0;
+  const ib = $("indent");
+  ib.classList.toggle("act", ind > 0);
+  ib.textContent = ind > 1 ? "⇥" + ind : "⇥";
+  $("outdent").style.display = ind > 0 ? "block" : "none";
   setStat(s.running ? "warn" : off ? "bad" : "ok", s.running ? "flying…" : off ? "airfield offline" : "live");
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");
@@ -1163,20 +1190,23 @@ function renderSession(){
 // iframes with agent-authored HTML never reload on unrelated deltas (an iframe
 // reloads even on reparenting, so stability beats any vdom here).
 function boxSig(b, i, len){
-  return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.err, !!b.sys, !!b.brief, b.stats || null,
+  return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.err, !!b.sys, !!b.brief, b.stats || null, b.depth || 0,
     boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null]);
 }
 function reconcileFeed(msgs, s, boxes){
   const len = boxes.length;
   // render items = boxes, plus a day divider wherever the calendar day changes
   const items = [];
-  let lastDay = null;
+  let lastDay = null, prevD = 0;
   for (let i = 0; i < len; i++) {
     const b = boxes[i];
     if (b.ts) {
       const k = dayKey(b.ts);
       if (k !== lastDay) { items.push({ key: "__day-" + k, ts: b.ts }); lastDay = k; }
     }
+    const d = b.depth || 0;
+    if (d > prevD) items.push({ key: "__aside-" + b.key, aside: { start: b.key, d } });  // a detour begins here
+    prevD = d;
     items.push({ key: b.key, b, i });
   }
   const want = new Set(items.map(x => x.key));
@@ -1196,10 +1226,14 @@ function reconcileFeed(msgs, s, boxes){
   let prev = null;
   for (const it of items) {
     let el = msgs.querySelector(`:scope > [data-bk="${it.key}"]`);
-    const sig = it.b ? boxSig(it.b, it.i, len) : dayLabel(it.ts); // label in sig → midnight rollover self-corrects
+    const sig = it.b ? boxSig(it.b, it.i, len)
+      : it.aside ? "A" + it.aside.d + (confirming === "zap:" + it.aside.start ? "!" : "")
+      : dayLabel(it.ts); // label in sig → midnight rollover self-corrects
     if (el && el.dataset.sig === sig) { prev = el; continue; }
     const tpl = document.createElement("template");
-    tpl.innerHTML = it.b ? turnHtml(it.b, it.i, len).trim() : `<div class="daysep">— ${esc(dayLabel(it.ts))} —</div>`;
+    tpl.innerHTML = it.b ? turnHtml(it.b, it.i, len).trim()
+      : it.aside ? asideBarHtml(it.aside)
+      : `<div class="daysep">— ${esc(dayLabel(it.ts))} —</div>`;
     const fresh = tpl.content.firstElementChild;
     fresh.dataset.bk = it.key; fresh.dataset.sig = sig;
     const fr = fresh.querySelector(".htmlframe");
@@ -1243,6 +1277,14 @@ feedEl.addEventListener("click", (e) => {
     delBoxes(keys.slice(keys.indexOf(t.dataset.delbelow)));
     return;
   }
+  if ((t = hit("[data-zap]"))) { confirming = "zap:" + t.dataset.zap; editing = null; keepScroll(renderSession); return; }
+  if ((t = hit("[data-zapgo]"))) {
+    const keys = asideRun(t.dataset.zapgo);
+    const d = (s.messages?.[t.dataset.zapgo]?.depth) || 0;
+    delBoxes(keys);
+    if (d && (Number(s.indent) || 0) >= d) patch({ sessions: { [view]: { indent: d - 1 } } });  // you were inside — step back out
+    return;
+  }
   if ((t = hit("[data-confirm]"))) { confirming = t.dataset.confirm; editing = null; keepScroll(renderSession); return; }
   if ((t = hit("[data-edit]"))) { editing = t.dataset.edit; confirming = null; keepScroll(renderSession); return; }
   if ((t = hit("[data-fmt]"))) {
@@ -1265,6 +1307,23 @@ feedEl.addEventListener("click", (e) => {
   }
 });
 function keepScroll(fn){ const t = feedEl.scrollTop; fn(); feedEl.scrollTop = t; }
+// ---------- detours: the contiguous run of boxes at >= the start box's depth ----------
+function asideRun(startKey){
+  const boxes = boxesOf(sess(view));
+  const i0 = boxes.findIndex((b) => b.key === startKey);
+  if (i0 < 0) return [];
+  const d = boxes[i0].depth || 0;
+  const keys = [];
+  for (let i = i0; i < boxes.length && (boxes[i].depth || 0) >= d; i++) keys.push(boxes[i].key);
+  return keys;  // deeper (nested) detours ride along by definition
+}
+function asideBarHtml(a){
+  const conf = confirming === "zap:" + a.start;
+  const btns = conf
+    ? `<button class="danger" data-zapgo="${a.start}">✕ zap ${asideRun(a.start).length} box(es)</button><button data-ecancel="1">×</button>`
+    : `<button data-zap="${a.start}" title="delete this whole detour (nested ones too)">✕</button>`;
+  return `<div class="asidebar" style="margin-left:${asideMl(a.d)}px"><span class="lbl">⇥ detour</span><span class="dash"></span>${btns}</div>`;
+}
 function delBoxes(keys){
   const s = sess(view);
   confirming = null;
@@ -1305,6 +1364,18 @@ $("brief").addEventListener("click", () => {
 });
 
 // ---------- add box / run / interrupt ----------
+$("indent").addEventListener("click", () => {
+  if (!view) return;
+  const d = Number(sess(view).indent) || 0;
+  if (d >= 6) { hint("six levels deep — surely not"); return; }
+  patch({ sessions: { [view]: { indent: d + 1 } } });
+  hint("⇥ detour — new boxes (yours AND claude's) indent; ✕ on the bar zaps them all");
+});
+$("outdent").addEventListener("click", () => {
+  if (!view) return;
+  const d = Number(sess(view).indent) || 0;
+  if (d) patch({ sessions: { [view]: { indent: d - 1 } } });
+});
 $("addbox").addEventListener("click", () => {
   if (!view) return;
   if (mode) stopMode("adding");

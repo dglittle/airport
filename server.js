@@ -177,7 +177,10 @@ function addBox(id, role, text, extra) {
   const s = sess(id);
   if (!s) return null;
   const key = nextKey(s);
-  apply({ sessions: { [id]: { messages: { [key]: Object.assign({ role, text, ts: Date.now() }, extra || {}) } } } });
+  const box = Object.assign({ role, text, ts: Date.now() }, extra || {});
+  const d = Number(s.indent) || 0;             // detour depth: every new box —
+  if (d && box.depth == null) box.depth = d;   // user, ai, tool — rides at the session's current level
+  apply({ sessions: { [id]: { messages: { [key]: box } } } });
   return key;
 }
 function hostSocket(hostName) {
