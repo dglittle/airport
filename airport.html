@@ -1097,7 +1097,7 @@ function chipLabel(b){
   let m;
   if (b.err || /^✗/.test(fl)) return "✗ " + (fl.replace(/^✗\s*/, "").slice(0, 15) || "error");
   if ((m = fl.match(/^▸ (\S+)/))) return "▸ " + m[1];
-  if (/^[◼⟲🛬]/.test(fl)) return fl.slice(0, 18);
+  if (/^[◼⟲🛬✂]/.test(fl)) return fl.slice(0, 18);
   return "→ " + fl.slice(0, 15);  // tool result
 }
 const asideMl = (d) => Math.min(d || 0, 6) * 18;  // px per detour level, capped
@@ -1327,10 +1327,36 @@ function asideBarHtml(a){
 function delBoxes(keys){
   const s = sess(view);
   confirming = null;
-  const mp = {}, anySynced = keys.some(k => s.messages?.[k]?.synced);
+  const del = new Set(keys);
+  const mp = {};
   for (const k of keys) mp[k] = null;
   const p = { messages: mp };
-  if (anySynced) p.dirty = true;
+  // Only synced USER/AI boxes are real transcript content. Tool/sys boxes are
+  // display artifacts: rebuilds exclude them and hiding them changes nothing —
+  // deleting only those needs neither dirty nor trim (no cold read).
+  const all = boxesOf(s);
+  const isReal = (b) => b.synced && (b.role === "user" || b.role === "ai");
+  const realDel = all.filter((b) => del.has(b.key) && isReal(b));
+  if (realDel.length) {
+    const firstIdx = all.findIndex((b) => b.key === realDel[0].key);
+    // turn-aligned tail? no surviving real box after the cut, the cut starts a
+    // turn (user box, prior real box is ai), and something survives before it
+    const survivorAfter = all.some((b, i) => i > firstIdx && !del.has(b.key) && isReal(b));
+    let prevReal = null;
+    for (let i = firstIdx - 1; i >= 0; i--) if (isReal(all[i])) { prevReal = all[i]; break; }
+    if (!survivorAfter && !s.dirty && s.claudeSessionId && prevReal && prevReal.role === "ai" && realDel[0].role === "user") {
+      // ✂ tail trim: the daemon cuts the real transcript right before this
+      // turn's prompt record and resumes warm — no text-only rebuild
+      const texts = [];
+      for (let i = firstIdx; i < all.length; i++) {
+        const b = all[i];
+        if (!isReal(b)) continue;
+        if (b.role !== "user" || !del.has(b.key)) break;
+        texts.push(b.text || "");
+      }
+      p.trim = { text: texts.join("\n\n") };  // = the prompt routeRun sent for that turn
+    } else { p.dirty = true; p.trim = null; }
+  }
   patch({ sessions: { [view]: p } });
 }
 

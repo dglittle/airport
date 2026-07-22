@@ -66,7 +66,17 @@ since you last looked, dimmed = its machine is offline.
 - **Editing or deleting synced history sets `dirty`** → the next ⚡ rebuilds the
   transcript from the boxes. You're choosing mirror-over-reality (the rebuilt
   transcript has only user/ai text — thinking and tool traffic don't survive);
-  a ⟲ box notes it. Cost: one cold cache read.
+  a ⟲ box notes it. Cost: one cold cache read. Two exceptions:
+  - **deleting only tool/sys boxes** (▸/→/◼/🛬/⟲ chips) never dirties — they're
+    display artifacts, absent from rebuilds anyway.
+  - **turn-aligned tail deletes get ✂ tail-trim instead**: when every deleted
+    user/ai box sits at the end of the history and the cut lands on a turn
+    boundary (the common case: zapping a trailing detour), the daemon cuts the
+    REAL transcript in place right before that turn's prompt record and
+    resumes the same session id. The surviving file is a byte-prefix of what
+    earlier turns cached → warm resume (within the 1h TTL), and the remaining
+    history keeps its real thinking + tool traffic. A ✂ box notes it; any
+    doubt (ambiguous/missing prompt match) falls back to the ⟲ rebuild.
 - **Fork** (⑂) branches a session. When the parent is clean, it's a REAL fork:
   the first ⚡ runs `--resume <parent> --fork-session`, branching the actual
   transcript (tool results + thinking included) under a new session id — one
@@ -79,9 +89,9 @@ since you last looked, dimmed = its machine is offline.
   `indent`: every new box — yours AND claude's — is stamped with that depth by
   the tower and renders indented. Ask the tangent, get the answer, then hit ✕
   on the detour bar to zap the whole indented run in one go (nested detours
-  ride along). Zapping synced boxes sets `dirty`, so the next ⚡ rebuilds the
-  transcript without the tangent — it stops costing context (one cold read,
-  same trade as any edit). ⇤ steps back to the main line *keeping* the boxes.
+  ride along). A tail zap takes the ✂ tail-trim fast path (warm cache, real
+  history kept — see above); zapping a detour you've since continued past
+  rebuilds instead. ⇤ steps back to the main line *keeping* the boxes.
 - **Flying** (marina's sailing): change the session's *airfield* in its flight
   plan — the next ⚡ rebuilds the transcript on the new machine (one cold read,
   🛬 box). A stored cwd that doesn't fit the target machine's whitelist remaps
@@ -244,6 +254,7 @@ The doc:
     indent,                     // current detour depth — new boxes get depth stamped from this
     state, running, startedAt,  // ready | processing | offline
     claudeSessionId, sidHost, dirty,
+    trim,                       // pending ✂ tail-trim: {text: first zapped turn's prompt}
     seenAt, lastRunEndedAt, hotUntil, turns, lastCost, lastMs, totalTokens, lastError,
     messages: { m000001: { role, text, ts, synced, stats, depth } },
 } } }

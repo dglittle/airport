@@ -218,6 +218,7 @@ function routeRun(id, text, fail) {
   apply({ sessions: { [id]: { running: true, state: "processing", startedAt: Date.now(), lastError: null } } });
   try {
     host.send(JSON.stringify({ type: "run", session: id, prompt, history, cap,
+      trim: (s.trim && s.trim.text) ? s.trim : null,  // pending tail-zap: daemon cuts the file in place before resuming
       meta: { cwd: s.cwd || "", model: s.model || "", systemPrompt: s.systemPrompt || "",
               systemMode: s.systemMode || "append", tools: s.tools || "",
               useClaudeMd: !!s.useClaudeMd, useMemory: s.useMemory !== false, useSkills: s.useSkills !== false,
@@ -487,8 +488,15 @@ wss.on("connection", (ws) => {
       // sweep: the transcript now reflects every box
       const sweep = {};
       for (const b of orderedBoxes(s)) if (!b.synced) sweep[b.key] = { synced: true };
+      // dirty clears only when this run actually reconciled it (a rebuild), or it
+      // was never set — a delete/edit landing MID-flight must survive this sweep
       const patch = { running: false, state: "ready", lastRunEndedAt: Date.now(),
-        turns: (s.turns || 0) + 1, dirty: false, messages: sweep };
+        turns: (s.turns || 0) + 1, dirty: !!(s.dirty && !m.synthed), messages: sweep };
+      if (m.trimConsumed) patch.trim = null;
+      // explicit false = the CLI ran without consuming it (zap landed mid-flight;
+      // the transcript grew past the cut) — rebuild next ⚡. Early bounces
+      // (cap busy, cwd error) omit the field and keep the trim pending.
+      else if (s.trim && m.trimConsumed === false) { patch.trim = null; patch.dirty = true; }
       if (m.claudeSessionId) { patch.claudeSessionId = m.claudeSessionId; patch.sidHost = m.sidHost || s.host; }
       // a successful fork turn consumed forkNext (the daemon reported the NEW sid);
       // a failed one keeps it so the next ⚡ re-attempts the branch (never appends to the parent)

@@ -134,6 +134,38 @@ function synthTranscript(cwd, modelId, history) {
   return sid;
 }
 
+// ---------- tail trim: cut zapped trailing turns off the REAL transcript ----------
+// The warm path for ⇥ detour zaps (and any turn-aligned tail delete): the cut
+// lands right before the prompt record of the first zapped turn, so the
+// surviving file is a byte-prefix of what earlier turns already cached — the
+// resume re-reads the warm prefix AND the remaining history keeps its real
+// tool traffic + thinking (no text-only rebuild). Any doubt → throw → the
+// caller falls back to full synthesis, which is always safe.
+function trimTranscript(cwd, sid, text) {
+  const file = path.join(os.homedir(), ".claude", "projects", encodeCwd(cwd), sid + ".jsonl");
+  const lines = fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim());
+  const want = String(text).trim();
+  const hits = [];
+  for (let i = 0; i < lines.length; i++) {
+    let r; try { r = JSON.parse(lines[i]); } catch (_) { continue; }
+    if (r.type !== "user" || r.isSidechain || r.isMeta || !r.message || r.message.role !== "user") continue;
+    const c = r.message.content;  // turn prompts are strings (tool results are block arrays)
+    const t = typeof c === "string" ? c
+      : Array.isArray(c) && c.length === 1 && c[0].type === "text" ? c[0].text : null;
+    if (t != null && t.trim() === want) hits.push(i);
+  }
+  if (hits.length !== 1) throw new Error(hits.length ? "prompt text ambiguous" : "prompt not found");
+  let cut = hits[0];
+  while (cut > 0) {  // metadata riding with the zapped turn (queue-operation, last-prompt, …)
+    let r; try { r = JSON.parse(lines[cut - 1]); } catch (_) { break; }
+    if (r.type === "user" || r.type === "assistant") break;
+    cut--;
+  }
+  if (!cut) throw new Error("cut would empty the transcript");
+  fs.writeFileSync(file, lines.slice(0, cut).join("\n") + "\n");
+  return lines.length - cut;
+}
+
 // ---------- running turns ----------
 const procs = new Map(); // session id -> ChildProcess
 
@@ -185,12 +217,20 @@ function run(cmd, attempt = 0) {
   // fork of an empty-cwd session, won't see the parent's transcript)
   const resumable = resumeSid && !cmd.meta.dirty && cmd.meta.sidHost === HOST_NAME &&
     fs.existsSync(path.join(os.homedir(), ".claude", "projects", encodeCwd(cwd), resumeSid + ".jsonl"));
-  if (!resumable) {
+  let trimmed = 0, trimErr = null;
+  if (resumable && cmd.trim && cmd.trim.text) {
+    try { trimmed = trimTranscript(cwd, resumeSid, cmd.trim.text); }
+    catch (e) { trimErr = e.message; }
+  }
+  if (!resumable || trimErr) {
     if ((cmd.history || []).length) {
       try { resumeSid = synthTranscript(cwd, model, cmd.history); synthed = true; }
       catch (e) { runDone(id, { failed: true, error: "synthesis failed: " + e.message }); return; }
     } else resumeSid = null;
   }
+  // the tower drops its trim marker once the transcript no longer needs it —
+  // either the tail was cut in place, or a rebuild made the point moot
+  const trimConsumed = !!(trimmed || synthed || cmd.trimSpent || cmd.priorSynthed);
   const sid = resumeSid || uuid();
 
   // context checkboxes (all live-verified on claude 2.1.207):
@@ -222,10 +262,13 @@ function run(cmd, attempt = 0) {
   try { child = spawn(CLAUDE_BIN, args, { cwd, detached: true, env, stdio: ["ignore", "pipe", "pipe"] }); }
   catch (e) { failRun(id, "spawn: " + e.message); return; }
   procs.set(id, child);
+  if (trimmed && attempt === 0)
+    addBox(id, "tool", `✂ zapped tail cut off the transcript in place (${trimmed} record(s)) — warm resume, real history kept`, { synced: true, sys: true });
   if (synthed && attempt === 0)
     addBox(id, "tool", (cmd.meta.sidHost && cmd.meta.sidHost !== HOST_NAME
       ? `🛬 session flew to ${HOST_NAME} — transcript rebuilt here (one cold read)`
       : "⟲ transcript rebuilt from boxes (fresh cache prefix)")
+      + (trimErr ? `\n(✂ tail-trim fell back: ${trimErr})` : "")
       + (remapped ? `\n🧭 hangar here: ${cwd} (stored cwd doesn't fit this machine)` : ""), { synced: true, sys: true });
 
   const killer = TURN_TIMEOUT_MS > 0
@@ -273,8 +316,10 @@ function run(cmd, attempt = 0) {
       towerSend({ type: "update", patch: { hosts: { [HOST_NAME]: { activeToken: tokenIdx + 1 } } } });
       log(`(${id}) allowance/auth failure — switching to token #${tokenIdx + 1}, retrying`);
       addBox(id, "tool", "(account allowance hit — switching accounts and retrying)", { synced: true, sys: true });
-      // retry resumes the SAME sid — the failed turn added nothing worth keeping
-      run({ ...cmd, meta: { ...cmd.meta, claudeSessionId: sid, sidHost: HOST_NAME, dirty: false } }, 1);
+      // retry resumes the SAME sid — the failed turn added nothing worth keeping.
+      // trim/synth already happened on attempt 0: don't redo, but keep reporting it
+      run({ ...cmd, trim: null, trimSpent: trimConsumed, priorSynthed: synthed || cmd.priorSynthed,
+            meta: { ...cmd.meta, claudeSessionId: sid, sidHost: HOST_NAME, dirty: false } }, 1);
       return;
     }
     if (failed)
@@ -285,6 +330,7 @@ function run(cmd, attempt = 0) {
       // id from the result (a failed fork keeps the parent sid so the retry re-branches)
       claudeSessionId: (forking && !failed && finalResult?.session_id) ? finalResult.session_id : sid,
       sidHost: HOST_NAME, failed: !!failed,
+      synthed: synthed || !!cmd.priorSynthed, trimConsumed,
       error: failed ? String(finalResult?.subtype || ("exit " + code)) : null,
       stats: {
         ms: finalResult?.duration_api_ms || 0, cost: finalResult?.total_cost_usd || 0,
@@ -300,7 +346,7 @@ function run(cmd, attempt = 0) {
   child.on("error", (err) => {
     clearTimeout(killer);
     procs.delete(id);
-    runDone(id, { failed: true, error: "spawn failed: " + err.message });
+    runDone(id, { failed: true, error: "spawn failed: " + err.message, synthed, trimConsumed });
   });
 }
 
