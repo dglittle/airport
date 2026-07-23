@@ -1,0 +1,17 @@
+
+- ✓ collapsed items in session chat view are sort of double indented in a "diversion"..
+  (fixed 7/23: inline chips were each adding the indent margin between line-mates;
+   detour chips now sit one per line, all on the same rail)
+
+- make option for "native" planes, which have an airport system prompt, and know how to awaken themselves in the future, and post messages into other threads..
+
+- make so can upload a file (into session).. or indeed into the cwd file-view thing..
+
+- I pasted the following into a prompt, and got an error:
+
+```
+- get current code on servers
+        - braid.org
+                - what is the current version of braid-http?
+        - dt.braid.org
+```

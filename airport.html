@@ -243,6 +243,7 @@
 
   /* ---------- detours (⇥ indented asides, zappable as a unit) ---------- */
   .turn.aside, .chip.aside{ border-left:2px solid rgba(232,161,60,.5); }
+  .chip.aside{ display:flex; width:fit-content; }  /* one per line — inline chips would stack the indent between line-mates */
   .asidebar{
     display:flex; align-items:center; gap:7px; margin:2px 0 8px; max-width:820px;
     color:var(--dim); font:11px ui-monospace,Menlo,monospace; user-select:none; -webkit-user-select:none;
