@@ -1,5 +1,5 @@
 
-- ✓ collapsed items in session chat view are sort of double indented in a "diversion"..
+* collapsed items in session chat view are sort of double indented in a "diversion"..
   (fixed 7/23: inline chips were each adding the indent margin between line-mates;
    detour chips now sit one per line, all on the same rail)
 

@@ -282,12 +282,21 @@ function fetchUsage(force) {
       res.resume();
       const h = res.headers;
       const num = (x) => (x == null ? null : Number(x));
-      const entry = h["anthropic-ratelimit-unified-5h-utilization"] != null ? {
-        five: num(h["anthropic-ratelimit-unified-5h-utilization"]),
-        fiveReset: (num(h["anthropic-ratelimit-unified-5h-reset"]) || 0) * 1000 || null,
-        seven: num(h["anthropic-ratelimit-unified-7d-utilization"]),
-        sevenReset: (num(h["anthropic-ratelimit-unified-7d-reset"]) || 0) * 1000 || null,
-        status: String(h["anthropic-ratelimit-unified-status"] || ""),
+      // the whole unified-* family, verbatim — windows come and go per plan
+      // (5h, 7d, maybe month/model someday); the UI discovers them from this.
+      // JSON string, not an object: shelf-merge would keep stale keys alive.
+      const all = {};
+      for (const [k, v] of Object.entries(h)) {
+        const m = /^anthropic-ratelimit-unified-(.+)$/.exec(k);
+        if (m) all[m[1]] = String(v);
+      }
+      const entry = all["5h-utilization"] != null ? {
+        five: num(all["5h-utilization"]),
+        fiveReset: (num(all["5h-reset"]) || 0) * 1000 || null,
+        seven: num(all["7d-utilization"]),
+        sevenReset: (num(all["7d-reset"]) || 0) * 1000 || null,
+        status: String(all["status"] || ""),
+        hdrs: JSON.stringify(all),
         at: Date.now(), err: null,
       } : { at: Date.now(), err: "no usage headers (http " + res.statusCode + ")" };
       apply({ usage: { [String(i + 1)]: entry } });

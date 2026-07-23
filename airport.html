@@ -104,6 +104,23 @@
   #gauge .lbl{ color:var(--muted); }
   #gauge .stale{ opacity:.5; }
 
+  /* hover card: every subscription-limit window the API reports */
+  #gaugetip{
+    position:fixed; z-index:180; display:none; min-width:230px; max-width:min(330px, 92vw);
+    background:var(--panel); border:1px solid var(--rule); border-radius:12px;
+    padding:10px 12px; box-shadow:0 8px 28px rgba(0,0,0,.5);
+    font:11px/1.7 ui-monospace,Menlo,monospace; color:var(--muted); white-space:nowrap;
+  }
+  #gaugetip.on{ display:block; }
+  #gaugetip .acctrow{ color:var(--ink); font-weight:700; }
+  #gaugetip .acctrow .when{ color:var(--dim); font-weight:400; float:right; margin-left:12px; }
+  #gaugetip .winrow .w{ display:inline-block; min-width:34px; color:var(--muted); }
+  #gaugetip .winrow .pct{ display:inline-block; min-width:38px; text-align:right; }
+  #gaugetip .winrow .rst{ color:var(--dim); }
+  #gaugetip .ok{ color:var(--hot); } #gaugetip .warn{ color:var(--run); } #gaugetip .bad{ color:var(--bad); }
+  #gaugetip .meta{ color:var(--dim); white-space:normal; }
+  #gaugetip hr{ border:none; border-top:1px solid var(--rule); margin:7px 0; }
+
   /* ---------- 3-column session view (explorer | file | claude) ---------- */
   #cols{ flex:1 1 auto; min-height:0; display:none; }
   #cols.on{ display:flex; }
@@ -395,6 +412,7 @@
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
     <button id="gear">⚙</button>
   </header>
+  <div id="gaugetip"></div>
 
   <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
@@ -693,6 +711,7 @@ function untilTxt(ms){
   if (!ms) return "";
   const s = Math.max(0, Math.floor((ms - Date.now()) / 1000));
   if (s < 3600) return Math.ceil(s / 60) + "m";
+  if (s >= 48 * 3600) return Math.round(s / 86400) + "d";
   return Math.floor(s / 3600) + "h" + Math.round((s % 3600) / 60) + "m";
 }
 function sevCls(x){ return x >= 0.85 ? "bad" : x >= 0.6 ? "warn" : "ok"; }
@@ -701,19 +720,68 @@ function renderGauge(){
   const g = $("gauge");
   const u = (doc[0] && doc[0].usage) || {};
   const keys = Object.keys(u).sort();
-  if (!keys.length) { g.innerHTML = ""; g.title = ""; return; }
-  const spans = [], tips = [];
+  if (!keys.length) { g.innerHTML = ""; hideGaugeTip(); return; }
+  const spans = [];
   for (const k of keys) {
     const a = u[k] || {};
     const tag = CIRC[+k] || k;
-    if (a.err) { spans.push(`<span class="acct stale">${tag}<span class="bad">✗</span></span>`); tips.push(`${tag} ${a.err}`); continue; }
+    if (a.err) { spans.push(`<span class="acct stale">${tag}<span class="bad">✗</span></span>`); continue; }
     const stale = !a.at || Date.now() - a.at > 25 * 60_000;
     spans.push(`<span class="acct${stale ? " stale" : ""}">${tag}<span class="${sevCls(a.five)}">${gaugeBar(a.five)}${Math.round((a.five || 0) * 100)}%</span>${a.seven >= 0.5 ? ` <span class="${sevCls(a.seven)}">7d${Math.round(a.seven * 100)}%</span>` : ""}</span>`);
-    tips.push(`${tag} 5h ${Math.round((a.five || 0) * 100)}% (resets ${untilTxt(a.fiveReset)}) · 7d ${Math.round((a.seven || 0) * 100)}% (resets ${untilTxt(a.sevenReset)})`);
   }
   g.innerHTML = spans.join("");
-  g.title = tips.join("\n");
+  if ($("gaugetip").classList.contains("on")) fillGaugeTip();  // live refresh while hovered
 }
+
+// ---------- the gauge hover card: every limit window the API reports ----------
+const WIN_LABEL = { "5h": "5h", "7d": "week" };  // friendlier names where we have them
+function tipBar(x){ const n = Math.max(0, Math.min(12, Math.round((x || 0) * 12))); return "▮".repeat(n) + "▯".repeat(12 - n); }
+function fillGaugeTip(){
+  const tip = $("gaugetip");
+  const u = (doc[0] && doc[0].usage) || {};
+  const hh = hosts();
+  const blocks = [];
+  for (const k of Object.keys(u).sort()) {
+    const a = u[k] || {};
+    const tag = CIRC[+k] || k;
+    const activeOn = Object.keys(hh).filter((h) => hh[h] && String(hh[h].activeToken || 1) === k && hostUp(h));
+    const rows = [`<div class="acctrow">${tag} account ${esc(k)}${activeOn.length ? ` <span class="meta">· flying ${esc(activeOn.join("+"))}</span>` : ""}<span class="when">${a.at ? "probed " + ago(a.at) : ""}</span></div>`];
+    if (a.err) rows.push(`<div class="bad">✗ ${esc(a.err)}</div>`);
+    else {
+      let all = null;
+      try { all = JSON.parse(a.hdrs || ""); } catch (_) {}
+      if (!all) all = { "5h-utilization": a.five, "5h-reset": (a.fiveReset || 0) / 1000, "7d-utilization": a.seven, "7d-reset": (a.sevenReset || 0) / 1000, status: a.status };
+      // discover the windows: every "<win>-utilization" the API sent
+      const wins = Object.keys(all).filter((x) => x.endsWith("-utilization")).map((x) => x.slice(0, -12));
+      wins.sort((x, y) => (x === "5h" ? -1 : y === "5h" ? 1 : x === "7d" ? -1 : y === "7d" ? 1 : x < y ? -1 : 1));
+      for (const w of wins) {
+        const util = Number(all[w + "-utilization"]) || 0;
+        const reset = (Number(all[w + "-reset"]) || 0) * 1000;
+        const wst = String(all[w + "-status"] || "");
+        rows.push(`<div class="winrow"><span class="w">${esc(WIN_LABEL[w] || w)}</span> <span class="${sevCls(util)}">${tipBar(util)}</span> <span class="pct ${sevCls(util)}">${Math.round(util * 100)}%</span> <span class="rst">${reset ? "· resets " + untilTxt(reset) : ""}${wst && wst !== "allowed" ? " · " + esc(wst) : ""}</span></div>`);
+      }
+      const meta = [];
+      if (all.status && all.status !== "allowed") meta.push(`status ${all.status}`);
+      if (all["representative-claim"]) meta.push(`binding: ${String(all["representative-claim"]).replace(/_/g, " ")}`);
+      if (all["overage-status"]) meta.push(`overage ${all["overage-status"]}${all["overage-disabled-reason"] ? " (" + String(all["overage-disabled-reason"]).replace(/_/g, " ") + ")" : ""}`);
+      if (all["fallback-percentage"] != null) meta.push(`fallback at ${Math.round(Number(all["fallback-percentage"]) * 100)}%`);
+      if (meta.length) rows.push(`<div class="meta">${esc(meta.join(" · "))}</div>`);
+    }
+    blocks.push(rows.join(""));
+  }
+  tip.innerHTML = blocks.join("<hr>");
+  const r = $("gauge").getBoundingClientRect();
+  tip.style.top = (r.bottom + 6) + "px";
+  tip.style.right = Math.max(8, window.innerWidth - r.right - 4) + "px";
+  tip.style.left = "auto";
+}
+function showGaugeTip(){ if (!Object.keys((doc[0] && doc[0].usage) || {}).length) return; fillGaugeTip(); $("gaugetip").classList.add("on"); }
+function hideGaugeTip(){ $("gaugetip").classList.remove("on"); }
+$("gauge").addEventListener("mouseenter", showGaugeTip);
+$("gauge").addEventListener("mouseleave", hideGaugeTip);
+$("gauge").addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") ? hideGaugeTip() : showGaugeTip(); });  // touch fallback
+document.addEventListener("click", hideGaugeTip);
+window.addEventListener("resize", hideGaugeTip);
 
 // ---------- the tarmac (the square apron; everything scales with --S) ----------
 let dragState = null;
