@@ -598,7 +598,12 @@ function isUnread(s){
 function hint(t){ $("hintline").textContent = t || ""; }
 const PLANES = ["🛩","✈️","🛫","🛬","🚁","🛸","🚀","🎈"];
 function emojiFor(id, s){ if (s.emoji) return s.emoji; let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PLANES[h % PLANES.length]; }
-const MODELS = ["claude-fable-5","claude-opus-4-8","claude-sonnet-5","claude-haiku-4-5"];
+const MODELS = ["claude-fable-5","claude-opus-5","claude-sonnet-5","claude-haiku-4-5"];
+// a session pinned to a model that's no longer listed (retired, or set outside
+// the UI) keeps its own option — otherwise the select would silently show, and
+// on the next edit save, the wrong model
+const modelOpts = (cur) => (MODELS.includes(cur) ? MODELS : [...MODELS, cur])
+  .map(m => `<option value="${esc(m)}"${m === cur ? " selected" : ""}>${esc(m.replace("claude-",""))}</option>`).join("");
 
 // ---------- sync (WS to the tower) ----------
 function send(obj){ if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch (_) {} } }
@@ -904,7 +909,7 @@ $("addplane").addEventListener("click", (e) => {
     <label>airfield (machine)</label><select id="f-host">${hostOptions(Object.keys(hh).find(hostUp) || "")}</select>
     <label>cwd (working directory)</label><input id="f-cwd" placeholder="" autocomplete="off">
     <label>model</label>
-    <select id="f-model">${MODELS.map(m => `<option value="${m}">${m.replace("claude-","")}</option>`).join("")}</select>
+    <select id="f-model">${modelOpts("claude-fable-5")}</select>
     <div class="btns"><button data-x>cancel</button><button id="f-note" title="a text file on the tarmac — lives in the shelf, no machine, no model">📝 note</button><button class="go" id="f-go">roll out 🛩</button></div>
     <div class="hint" id="f-err"></div>`,
   (ov) => {
@@ -1044,9 +1049,7 @@ function buildCfg(cfg){
       <div><label>airfield <span class="warn">— change = fly there; next ⚡ rebuilds context</span></label>
         <select id="c-host">${hostOptions(s.host || "")}</select></div>
       <div><label>model <span class="warn">— change = cold cache</span></label>
-        <select id="c-model">
-          ${MODELS.map(m => `<option value="${m}" ${m === (s.model||"claude-fable-5") ? "selected" : ""}>${m.replace("claude-","")}</option>`).join("")}
-        </select></div>
+        <select id="c-model">${modelOpts(s.model || "claude-fable-5")}</select></div>
     </div>
     <label>cwd <span class="warn">— change = cold cache + new transcript home</span></label>
     <input id="c-cwd" value="${esc(s.cwd || "")}">
