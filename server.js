@@ -622,9 +622,13 @@ server.on("error", (err) => {
   if (err.code === "EADDRINUSE") log(`port ${PORT} bound — old tower still up`);
   else log(`server error: ${err.message}`);
 });
-server.listen(PORT, "0.0.0.0", () => {
+// "::" = dual-stack: IPv6 natively, IPv4 via mapped addresses (Linux/macOS
+// default). IPv6-only client paths (phone hotspots on modern carriers) need
+// this plus an AAAA record. AIRPORT_BIND=0.0.0.0 restores the v4-only bind.
+const BIND = process.env.AIRPORT_BIND || "::";
+server.listen(PORT, BIND, () => {
   const ss = doc[0].sessions || {};
-  log(`✈ airport tower ${VERSION} on ${CERT ? "https" : "http"}://0.0.0.0:${PORT} — ${Object.keys(ss).length} session(s), auth ${PASS ? "ON" : "OFF (open)"}, data ${DATA}`);
+  log(`✈ airport tower ${VERSION} on ${CERT ? "https" : "http"}://[${BIND}]:${PORT} — ${Object.keys(ss).length} session(s), auth ${PASS ? "ON" : "OFF (open)"}, data ${DATA}`);
 });
 
 process.on("SIGINT", () => { try { fs.writeFileSync(DATA, JSON.stringify(doc)); } catch (_) {} process.exit(0); });

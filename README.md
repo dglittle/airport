@@ -188,6 +188,7 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | var | used by | default | meaning |
 |---|---|---|---|
 | `AIRPORT_PORT` | tower | `7800` | listen port |
+| `AIRPORT_BIND` | tower | `::` *(dual-stack)* | listen address; IPv6+IPv4 by default — set `0.0.0.0` for v4-only. IPv6-only clients (carrier hotspots) also need an AAAA record for the tower's hostname |
 | `AIRPORT_PASS` | both | *(unset = open)* | the one passphrase (browsers + daemons) |
 | `AIRPORT_TLS_CERT` / `AIRPORT_TLS_KEY` | tower | *(unset = http)* | cert paths; watched + hot-reloaded |
 | `AIRPORT_DATA` | tower | `./airport-data.json` | shelf doc persistence |
