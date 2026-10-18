@@ -1072,7 +1072,7 @@ function renderTarmac(){
            qn ? `⏭${qn} queued` : "", isUnread(s) ? "unread" : ""]).filter(Boolean).join(" · ");
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
-        <div class="emoji">${isTile ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>
+        <div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>
         <div class="cap"><div class="name">${esc(name)}</div></div>${qn ? `<div class="qn" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
     }
@@ -1635,8 +1635,9 @@ function renderEmber(s){
   $("notewrap").classList.remove("on");
   const em = s.em || {}, st = emberStatus(em);
   $("back").style.display = "block";
-  $("hdr-icon").classList.remove("on");
-  $("hdr-title").textContent = (s.emoji || em.emoji || "🔥") + " " + tileTitle(view, s);
+  const hu = iconUrl(view, s), hi = $("hdr-icon");
+  if (hu) { if (hi.getAttribute("src") !== hu) { hi.onerror = () => hi.classList.remove("on"); hi.src = hu; } hi.classList.add("on"); } else hi.classList.remove("on");
+  $("hdr-title").textContent = (hu ? "" : (s.emoji || em.emoji || "🔥") + " ") + tileTitle(view, s);
   $("hdr-sub").textContent = "ember · " + st + (em.total ? ` · ${em.done || 0}/${em.total}` : "") + (em.msg ? " · " + em.msg : "")
     + (em.usd != null ? ` · $${Number(em.usd).toFixed(2)}${em.budget ? " of $" + em.budget : ""}` : "");
   setStat(["failed", "stalled", "unreachable"].includes(st) ? "bad" : st === "running" ? "warn" : "ok", "ember " + st);
