@@ -16,6 +16,8 @@
 //         POST /update      {pass?, patch} → shelf-merge + broadcast (register scripts)
 //         POST /run         {pass?, id, text?} → run a turn (curl-able)
 //         POST /wake        {pass?, id} → fire one ⏰ timer wake now (see wakeTick)
+//         POST /queue       {pass?, id, text} → ⏭ queue a message if flying, else fly it now
+//         POST /ember       {pass?, id, action} → stop|pause|resume a 🔥 ember tile (see ember tiles)
 //         POST /whisper?pass= raw audio → OpenAI whisper transcription
 //   WS    browsers + host daemons connect, auth, receive the doc, exchange
 //         deltas; run/interrupt/fs are routed to the owning host's socket.
@@ -221,7 +223,7 @@ const termOwners = new Map(); // termId -> {ws (browser), hostName}
 function routeRun(id, text, fail) {
   const s = sess(id);
   if (!s) return fail("no such session");
-  if (s.kind === "note") return fail("that's a 📝 note — nothing to fly");
+  if (s.kind) return fail(s.kind === "note" ? "that's a 📝 note — nothing to fly" : "that's a " + s.kind + " tile — nothing to fly");
   if (s.running) return fail("already running");
   if (typeof text === "string" && text.trim()) addBox(id, "user", text.trim().slice(0, 64 * 1024));
   const host = hostSocket(s.host);
@@ -363,7 +365,7 @@ function wakeBlocked(s, useGate) {
 }
 function fireWake(id, useGate) {
   const s = sess(id);
-  if (!s || s.kind === "note") return "no such plane";
+  if (!s || s.kind) return "no such plane";
   const why = wakeBlocked(s, useGate);
   if (why) {
     const w = "⏰ waiting: " + why;
@@ -384,13 +386,193 @@ function wakeTick() {
   const now = Date.now();
   for (const [id, s] of Object.entries(doc[0].sessions || {})) {
     const every = Number(s && s.wakeEvery) || 0;
-    if (!s || s.kind === "note" || every < 5) continue;
+    if (!s || s.kind || every < 5) continue;
     if (now < (Number(s.lastWakeAt) || 0) + every * 60_000) continue;
     fireWake(id, true);
   }
 }
 setInterval(wakeTick, 60_000).unref();
 setTimeout(() => { if (!(doc[0].towerFeatures || {}).wake) apply({ towerFeatures: { wake: 1 } }); }, 0);
+
+// ---------- 🔥 ember tiles: long-running work with a URL (github.com/dglittle/ember, contract v1) ----------
+// A tile {kind:"ember", url, owner?, emTold?} sits on the tarmac like a plane but never flies. The tower
+// watches the ember's B/state (SSE over HTTP/2: one connection per origin carries every ember there) and
+// stamps a small summary on the tile as s.em, at most every 2 s and only on change. beat isn't copied (it
+// would rewrite the doc every few seconds); s.em.stalled flips instead (running/paused, beat > 90 s old).
+// New `tell` messages go to the owner plane (s.owner, else the ember's own owner.plane if its owner.tower
+// is this tower): flown now if it's idle, ⏭ queued if it's flying. s.emTold = the newest tell t already
+// handled (persisted, so a restart doesn't resend; a tile without it skips what's already there).
+// POST /ember {pass, id, action: stop|pause|resume} (or ws {type:"ember"}) → the ember's B/control.
+const http2 = require("http2");
+const emberConns = new Map();   // origin → ClientHttp2Session
+const emberWatch = new Map();   // tile id → watcher {url, shelf, req, ...}
+function emberParse(raw) {
+  const u = new URL(raw);
+  if (u.protocol !== "https:") throw new Error("ember urls are https");
+  const key = new URLSearchParams(u.hash.slice(1)).get("k") || u.searchParams.get("k") || "";
+  return { origin: u.origin, base: u.pathname.endsWith("/") ? u.pathname : u.pathname + "/", key };
+}
+function emberConn(origin) {
+  const old = emberConns.get(origin);
+  if (old && !old.closed && !old.destroyed) return old;
+  const c = http2.connect(origin);
+  const drop = () => { if (emberConns.get(origin) === c) emberConns.delete(origin); };
+  c.on("error", (e) => { log("ember " + origin + ": " + e.message); drop(); });
+  c.on("close", drop); c.on("goaway", drop);
+  emberConns.set(origin, c);
+  return c;
+}
+function emberRequest(raw, headers) {
+  const p = emberParse(raw);
+  return emberConn(p.origin).request(Object.assign({ ":path": p.base + headers.path }, p.key ? { authorization: "Bearer " + p.key } : {},
+    Object.fromEntries(Object.entries(headers).filter(([k]) => k !== "path"))));
+}
+function emberStart(id, url) {
+  emberStop(id);
+  const w = { url, shelf: [null, null], req: null, timer: null, backoff: 2000, lastData: 0, err: null, stampT: null, lastStamp: 0 };
+  emberWatch.set(id, w);
+  emberOpen(id, w);
+}
+function emberStop(id) {
+  const w = emberWatch.get(id);
+  if (!w) return;
+  emberWatch.delete(id);
+  clearTimeout(w.timer); clearTimeout(w.stampT);
+  const r = w.req; w.req = null;
+  if (r) { try { r.close(); } catch (_) {} }
+}
+function emberOpen(id, w) {
+  if (emberWatch.get(id) !== w) return;
+  let req;
+  try { req = emberRequest(w.url, { path: "state", accept: "text/event-stream" }); }
+  catch (e) { return emberRetry(id, w, e.message); }
+  w.req = req; w.lastData = Date.now();
+  let buf = "", status = 0;
+  const gone = (why) => { if (w.req === req) emberRetry(id, w, why); };
+  req.setEncoding("utf8");
+  req.on("response", (h) => { status = h[":status"]; if (status !== 200) gone("GET state → " + status); });
+  req.on("data", (d) => {
+    if (status !== 200 || w.req !== req) return;
+    w.lastData = Date.now(); buf += d;
+    if (buf.length > 4e6) return gone("event too big");
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      let ev = "", data = "";
+      for (const l of block.split("\n")) {
+        if (l.startsWith("event:")) ev = l.slice(6).trim();
+        else if (l.startsWith("data:")) data += l.slice(5).trim();
+      }
+      if (ev !== "shelf" && ev !== "delta") continue;   // ": ping" comments: lastData already moved
+      try { if (ev === "shelf") w.shelf = [null, null]; shelf_merge(w.shelf, JSON.parse(data)); } catch (_) { continue; }
+      w.backoff = 2000; w.err = null;
+      emberSeen(id, w);
+    }
+  });
+  req.on("error", (e) => gone(e.message));
+  req.on("close", () => gone("stream closed"));
+}
+function emberRetry(id, w, why) {
+  if (emberWatch.get(id) !== w) return;
+  const r = w.req; w.req = null;
+  if (r) { try { r.close(); } catch (_) {} }
+  w.err = String(why || "lost").slice(0, 200);
+  emberSeen(id, w);
+  clearTimeout(w.timer);
+  w.timer = setTimeout(() => emberOpen(id, w), w.backoff);
+  w.backoff = Math.min(w.backoff * 2, 60_000);
+}
+function emberSummary(w) {
+  const s = w.shelf[0] || {}, p = s.progress || {};
+  const str = (x, n) => (x == null || x === "" ? null : String(x).slice(0, n));
+  const num = (x) => (typeof x === "number" && isFinite(x) ? x : null);
+  const live = s.status === "running" || s.status === "paused";
+  return {
+    title: str(s.title, 200), emoji: str(s.emoji, 16), status: str(s.status, 20),
+    done: num(p.done), total: num(p.total), msg: str(p.msg, 200),
+    started: num(s.started), ended: num(s.ended), error: str(s.error, 300),
+    usd: s.spent ? num(s.spent.usd) : null, budget: s.spent ? num(s.spent.budget) : null,
+    // a string, not an object: shelf-merge would keep a dropped control alive
+    controls: s.controls && typeof s.controls === "object" ? Object.keys(s.controls).filter((k) => s.controls[k]).join(",") : null,
+    stalled: live && num(s.beat) && Date.now() - s.beat > 90_000 ? true : null,
+    conn: w.err || (w.shelf[0] ? null : "connecting"),
+  };
+}
+function emberSeen(id, w) {   // stamp soon: at most one stamp per tile per 2 s, the latest state wins
+  if (w.stampT) return;
+  w.stampT = setTimeout(() => {
+    w.stampT = null; w.lastStamp = Date.now();
+    const s = sess(id);
+    if (!s || s.kind !== "ember" || emberWatch.get(id) !== w) return;
+    apply({ sessions: { [id]: { em: emberSummary(w) } } });   // unchanged = no delta, no save
+    emberTells(id, w);
+  }, Math.max(0, w.lastStamp + 2000 - Date.now()));
+}
+function sameTower(t) {
+  try { return !process.env.AIRPORT_URL || new URL(t).host === new URL(process.env.AIRPORT_URL).host; } catch (_) { return false; }
+}
+function emberTells(id, w) {
+  const s = sess(id), st = w.shelf[0];
+  if (!s || !st || !Array.isArray(st.tell)) return;
+  const tells = st.tell.filter((x) => x && Number(x.t) > 0).sort((a, b) => a.t - b.t);
+  const newest = tells.length ? Number(tells[tells.length - 1].t) : 0;
+  if (s.emTold == null) { apply({ sessions: { [id]: { emTold: newest } } }); return; }  // first sight: old news
+  const fresh = tells.filter((x) => Number(x.t) > Number(s.emTold));
+  if (!fresh.length) return;
+  apply({ sessions: { [id]: { emTold: newest } } });
+  const o = st.owner && typeof st.owner === "object" ? st.owner : {};
+  const owner = s.owner || (o.plane && (!o.tower || sameTower(o.tower)) ? String(o.plane) : null);
+  const p = owner && sess(owner);
+  if (!p || p.kind) { if (owner) log("ember " + id + ": owner '" + owner + "' isn't a plane here — tell dropped"); return; }
+  let bare = s.url; try { const u = new URL(s.url); u.hash = ""; u.searchParams.delete("k"); bare = u.href; } catch (_) {}
+  const text = `🔥 ember "${s.title || st.title || id}" (tile ${id}${st.status ? ", " + st.status : ""}) says:\n`
+    + fresh.map((x) => String(x.text || "").slice(0, 4000)).join("\n") + `\n${bare}`;
+  log("ember " + id + " → tell " + owner);
+  queueOrRun(owner, text, (error) => apply({ sessions: { [owner]: { queueWait: "⏭ waiting: " + error } } }));
+}
+// a message for a plane: ⏭ queued if it's flying, flown now if not (shared by ember tells and POST /queue)
+function queueOrRun(id, text, fail) {
+  const s = sess(id);
+  if (!s) return fail("no such session");
+  if (s.kind) return fail("not a plane");
+  text = String(text || "").trim().slice(0, 64 * 1024);
+  if (!text) return fail("nothing to say");
+  if (s.running) { addBox(id, "user", text, { queued: true }); return true; }
+  return routeRun(id, text, fail);
+}
+function emberControl(id, action, cb) {
+  const s = sess(id);
+  if (!s || s.kind !== "ember") return cb({ ok: false, error: "not an ember tile" });
+  if (!["stop", "pause", "resume"].includes(action)) return cb({ ok: false, error: "action: stop|pause|resume" });
+  let done = false;
+  const fin = (r) => { if (!done) { done = true; cb(r); } };
+  try {
+    const req = emberRequest(s.url, { path: "control", ":method": "POST", "content-type": "application/json" });
+    let out = "";
+    req.setEncoding("utf8");
+    req.on("data", (d) => { out += d; });
+    req.on("end", () => { let j = null; try { j = JSON.parse(out); } catch (_) {} fin(j && typeof j === "object" ? j : { ok: false, error: "bad reply: " + out.slice(0, 100) }); });
+    req.on("error", (e) => fin({ ok: false, error: e.message }));
+    req.setTimeout(15_000, () => { try { req.close(); } catch (_) {} fin({ ok: false, error: "timeout" }); });
+    req.end(JSON.stringify({ action }));
+  } catch (e) { fin({ ok: false, error: e.message }); }
+}
+// watchers follow the doc: a tile added/removed/re-pointed starts/stops/restarts its watcher
+function emberSync() {
+  const ss = doc[0].sessions || {};
+  for (const [id, w] of emberWatch) { const s = ss[id]; if (!s || s.kind !== "ember" || s.url !== w.url) emberStop(id); }
+  for (const [id, s] of Object.entries(ss))
+    if (s && s.kind === "ember" && typeof s.url === "string" && s.url && !emberWatch.has(id)) emberStart(id, s.url);
+}
+setTimeout(emberSync, 0);
+setInterval(() => {
+  emberSync();
+  for (const [id, w] of emberWatch) {
+    if (w.req && Date.now() - w.lastData > 50_000) emberRetry(id, w, "no ping for 50 s");
+    else emberSeen(id, w);   // re-judges stalled
+  }
+}, 15_000).unref();
+setTimeout(() => { if (!(doc[0].towerFeatures || {}).ember) apply({ towerFeatures: { ember: 1 } }); }, 0);
 
 function routeInterrupt(id) {
   const s = sess(id);
@@ -605,6 +787,7 @@ const handler = (req, res) => {
         const before = { ...(doc[0].sessions || {}) };
         apply(j.patch);
         reapDeleted(before);
+        emberSync();
         return json(res, 200, { ok: true });
       }
       if (url.pathname === "/icon") {
@@ -621,6 +804,13 @@ const handler = (req, res) => {
         const r = routeRun(String(j.id || ""), j.text, (e) => { failed = e; });
         return failed ? json(res, 409, { ok: false, error: failed }) : json(res, 200, { ok: true });
       }
+      if (url.pathname === "/queue") {
+        let failed = null;
+        queueOrRun(String(j.id || ""), j.text, (e) => { failed = e; });
+        return failed ? json(res, 409, { ok: false, error: failed }) : json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/ember")
+        return emberControl(String(j.id || ""), String(j.action || ""), (r) => json(res, r && r.ok ? 200 : 409, r));
       if (url.pathname === "/wake") {
         const err = fireWake(String(j.id || ""), false);
         return err ? json(res, 409, { ok: false, error: err }) : json(res, 200, { ok: true });
@@ -705,6 +895,7 @@ wss.on("connection", (ws) => {
       const before = { ...(doc[0].sessions || {}) };
       apply(m.patch);
       reapDeleted(before);
+      emberSync();
       return;
     }
     if (m.type === "usage-probe" && ws._role === "browser") { // header ↻: probe now (at most once per 90 s)
@@ -725,6 +916,12 @@ wss.on("connection", (ws) => {
       if (s.running) { addBox(m.session, "user", m.text.trim().slice(0, 64 * 1024), { queued: true }); return; }
       routeRun(m.session, m.text, (error) => {
         try { ws.send(JSON.stringify({ type: "run-failed", session: m.session, error })); } catch (_) {}
+      });
+      return;
+    }
+    if (m.type === "ember" && ws._role === "browser" && typeof m.session === "string") {
+      emberControl(m.session, String(m.action || ""), (r) => {
+        if (!r || !r.ok) { try { ws.send(JSON.stringify({ type: "run-failed", session: m.session, error: "ember: " + ((r && r.error) || "control failed") })); } catch (_) {} }
       });
       return;
     }

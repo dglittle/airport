@@ -164,8 +164,39 @@ lists and scratch pads that should live where the work lives.
   at its cap) just retries next minute; `wakeGate` (default 0.8) skips wakes
   while every account's 5h use is at or above the gate. `POST /wake {pass, id}`
   fires one now.
-- **tarmac.js** is a plain CLI over the tower (`ls`, `show`, `say`, `wake`,
-  `new`, `set`, `usage`), e.g. for a plane that oversees other planes.
+- **tarmac.js** is a plain CLI over the tower (`ls`, `show`, `say`, `queue`,
+  `wake`, `new`, `set`, `usage`, `ember`), e.g. for a plane that oversees other planes.
+
+## 🔥 Ember tiles: work longer than a turn
+
+A plane's turn ends when it replies. Work that has to keep going (a batch of
+hundreds of sessions, a long eval, something waiting on CI) runs as an
+**ember**: long-running work with a URL that serves a dashboard, a live state
+stream and a stop button. The contract is at
+[github.com/dglittle/ember](https://github.com/dglittle/ember).
+
+- **A tile** is `{kind:"ember", url}` on the tarmac: `tarmac.js ember <tile>
+  <url> --owner <plane>`, or 🔥 ember in the roll-out sheet. The key, if any,
+  rides in the URL as `#k=…`.
+- **The tower watches it.** It subscribes to the ember's `/state` (SSE over
+  HTTP/2, one connection per origin) and stamps a small summary on the tile
+  as `em`, at most every 2 s and only on change. The tile shows the status,
+  `done/total` and a progress bar. A running ember whose heartbeat is over 90 s
+  old shows as **stalled**. One the tower can't reach shows as **unreachable**,
+  and the tower retries with backoff.
+- **Opening the tile** shows the ember's own dashboard in an iframe, under a
+  native bar: ⏸ ▶ ■ (whatever its `controls` allow), ↗ to open it in its own
+  tab, the plane its messages go to, and ✕ to remove the tile (the ember keeps
+  running).
+- **Messages come back.** Each new entry in the ember's `tell` goes to its
+  owner plane (the tile's `owner`, else the ember's own `owner.plane` if its
+  `owner.tower` is this tower) as a user turn. It flies now if the plane is
+  idle, and is ⏭ queued if it's flying. So a plane can start an ember, end its
+  turn, and be woken when the ember finishes. `emTold` records the newest
+  message already handled, so a restart doesn't resend.
+- `POST /ember {pass, id, action}` steers it (stop | pause | resume), and
+  `POST /queue {pass, id, text}` is the "queue it or fly it" used for the
+  messages.
 
 ## The header
 
@@ -295,10 +326,11 @@ leaves localhost:
 WS to the tower: `{type:"auth", role:"browser"|"host", pass, host?, info?}` →
 `{type:"doc"}` then `{type:"delta"}` stream. Writers send
 `{type:"update", patch}` (unversioned; the tower is the single merge point).
-Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term`.
+Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term` / `ember`.
 Daemons: `addbox` / `run-done` / `fs-res`. HTTP (curl-able, all POSTs take
 `pass`): `POST /update`, `POST /run {id, text?}`, `POST /pump {id}`,
-`POST /wake {id}`, `POST /icon`, `POST /whisper`; `GET /doc`, `GET /health`,
+`POST /wake {id}`, `POST /queue {id, text}`, `POST /ember {id, action}`,
+`POST /icon`, `POST /whisper`; `GET /doc`, `GET /health`,
 `GET /icon/<id>.png`.
 
 The doc:
@@ -306,7 +338,11 @@ The doc:
 ```js
 { pageVersion, hosts: { mac: { online, lastSeen, roots, sessRoot, defaultModel, … } },
   sessions: { "<id>": {
-    kind,                       // absent = claude session; "note" = a 📝 text file (only title/emoji/x/y/text/editedAt apply)
+    kind,                       // absent = claude session; "note" = a 📝 text file (only title/emoji/x/y/text/editedAt apply);
+                                //   "ember" = a 🔥 ember tile (title/emoji/x/y/url/owner/em/emTold)
+    url, owner, emTold,         // 🔥 ember: its base URL (#k=key) · the plane its tells go to · newest tell handled
+    em,                         // 🔥 ember summary, stamped by the tower: {status, title, emoji, done, total, msg,
+                                //   started, ended, error, usd, budget, controls:"stop,pause,…", stalled, conn}
     text, editedAt,             // 📝 note content + last-edit stamp
     title, emoji, host, cwd, model, systemPrompt, systemMode, tools,   // the params
     x, y,                       // fractions of the apron square
