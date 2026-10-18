@@ -25,18 +25,25 @@
     padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
   header{
-    flex:0 0 auto; padding:10px 14px; display:flex; gap:10px; align-items:center;
+    flex:0 0 auto; padding:5px 8px; display:flex; gap:6px; align-items:center;
     border-bottom:1px solid var(--rule); -webkit-user-select:none; user-select:none;
   }
-  header b{ font-size:14px; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  header .sub{ color:var(--dim); font-size:10px; font-family:ui-monospace,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  /* title never truncates: it takes its natural width and WRAPS if it must;
+     the sub line only gets what's left (basis 0), wrapping to ≤3 lines */
+  header b{ font-size:14px; line-height:1.2; flex:0 1 auto; min-width:0; white-space:normal; overflow-wrap:anywhere; }
+  header .sub{ color:var(--dim); font-size:10px; line-height:1.25; font-family:ui-monospace,Menlo,monospace; flex:1 1 0; min-width:70px;
+    white-space:normal; overflow-wrap:anywhere; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
   header button{
     background:transparent; border:1px solid var(--rule); color:var(--muted);
-    border-radius:8px; padding:4px 10px; font-size:13px; cursor:pointer; flex:0 0 auto;
+    border-radius:7px; padding:3px 7px; font-size:13px; cursor:pointer; flex:0 0 auto;
     -webkit-tap-highlight-color:transparent;
   }
   header .stat{ font-size:10px; color:var(--muted); font-family:ui-monospace,Menlo,monospace; display:flex; align-items:center; gap:5px; flex:0 0 auto; }
-  header #gauge:empty + .stat{ margin-left:auto; }
+  /* the dashboard (box meter + usage dials): inline on wide screens; its own
+     right-aligned second header row on phones, so the title keeps its room */
+  #dash{ margin-left:auto; flex:0 0 auto; display:flex; gap:.8em; align-items:center; }
+  #dash:has(#mem:empty):has(#gauge:empty){ display:none; }
+  .hbreak{ display:none; }
   header .stat .dot{ width:7px; height:7px; border-radius:50%; background:var(--dim); }
   header .stat.ok .dot{ background:var(--hot); }
   header .stat.warn .dot{ background:var(--run); animation:pulse 1.1s infinite; }
@@ -65,13 +72,32 @@
   .plane.hot{ border-color:var(--hot); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
   .plane.running{ border-color:var(--run); box-shadow:0 0 calc(var(--S)*0.035) rgba(255,196,107,.45); animation:pulse 1.1s infinite; }
   .plane.offline{ opacity:.45; }
+  /* multi-select: drag on empty tarmac = rubber band; selected planes move as a group */
+  .plane.sel{ outline:calc(var(--S)*0.004) solid var(--accent); outline-offset:calc(var(--S)*0.005); }
+  #selbox{ position:absolute; display:none; border:1px dashed var(--accent); background:rgba(232,161,60,.08);
+    border-radius:4px; pointer-events:none; z-index:5; }
+  #selbox.on{ display:block; }
   .plane.dragging{ box-shadow:0 calc(var(--S)*0.015) calc(var(--S)*0.05) rgba(0,0,0,.6); }
   .plane .unread{
     position:absolute; top:calc(var(--S)*-0.012); right:calc(var(--S)*-0.012);
     width:calc(var(--S)*0.03); height:calc(var(--S)*0.03); border-radius:50%;
     background:var(--new); border:calc(var(--S)*0.005) solid var(--bg); box-shadow:0 0 calc(var(--S)*0.025) rgba(183,140,255,.7);
   }
-  .plane .emoji{ font-size:calc(var(--S)*0.038); line-height:1.15; }
+  .plane .emoji{ font-size:calc(var(--S)*0.038); line-height:1.15; position:relative; }
+  /* a plane image replaces the emoji glyph (the emoji stays as the fallback if it 404s) */
+  .plane .emoji img.picon{ display:block; width:calc(var(--S)*0.052); height:calc(var(--S)*0.052); border-radius:22%;
+    margin:calc(var(--S)*0.001) auto calc(var(--S)*0.002); pointer-events:none; }
+  .plane .emoji img.picon + .eglyph{ display:none; }
+  #hdr-icon{ display:none; width:22px; height:22px; border-radius:22%; flex:0 0 auto; }
+  #hdr-icon.on{ display:block; }
+  #pumpbtn{ display:none; flex:.8; border-color:#e8a13c; color:var(--accent); }
+  #pumpbtn.on{ display:block; }
+  .who .pm{ color:var(--accent); }
+  /* which account (token) the plane last flew on — in the meta line after the host,
+     in the token's colour (upright = pinned, italic+fainter = auto, amber = pinned but failed over) */
+  .plane .meta .tkc{ font-weight:600; opacity:.85; }
+  .plane .meta .tkc.auto{ font-style:italic; opacity:.65; }
+  .plane .meta .tkc.over{ color:var(--run); }
   .plane .name{
     font-size:calc(var(--S)*0.0165); font-weight:600; color:var(--ink); line-height:1.2;
     max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -94,15 +120,44 @@
   }
   .emptytarmac{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; pointer-events:none; }
   /* allowance gauge — lives in the header bar, one span per account */
+  /* box meter: RAM · swap · ✻ claude processes + their RSS (tower pushes {type:"mem"} every 10 s) */
+  #mem{ flex:0 0 auto; display:flex; gap:.4em; align-items:center; font:10px ui-monospace,Menlo,monospace; color:var(--muted); white-space:nowrap; cursor:default; }
+  #mem:empty{ display:none; }
+  #mem .lb{ color:var(--dim); } #mem .lb.warn, #mem .v.warn{ color:var(--run); } #mem .lb.crit, #mem .v.crit{ color:var(--bad); }
+  #mem .bar{ width:44px; height:3px; background:var(--rule); border-radius:1.5px; overflow:hidden; }
+  #mem .bar i{ display:block; height:100%; background:var(--hot); border-radius:1.5px; }
+  #mem .bar.warn i{ background:var(--run); } #mem .bar.crit i{ background:var(--bad); }
+  #mem .cl{ color:var(--accent); }
+  #mem.stale{ opacity:.45; }
+  /* mem over swap, stacked like the usage dials */
+  #mem .mgrid{ display:grid; grid-template-columns:auto auto auto; gap:2px 4px; align-items:center; }
+  #mem .mgrid .lb{ font-size:7px; line-height:1; text-align:right; }
+  #mem .mgrid .v{ font-size:8.5px; line-height:1; }
+  /* usage-limit dials: t1/t2 · 5h/7d/f7d bars, thin bar = window elapsed,
+     gold box = token a live airfield is flying on, age, ↻ */
   #gauge{
-    margin-left:auto; display:flex; flex-direction:column; align-items:flex-start; gap:1px; flex:0 0 auto;
-    font:9.5px/1.25 ui-monospace,Menlo,monospace; color:var(--dim);
+    flex:0 0 auto; display:flex; gap:.45em; align-items:center; cursor:pointer;
+    font:10px ui-monospace,Menlo,monospace; color:var(--muted);
   }
   #gauge:empty{ display:none; }
-  #gauge .acct{ white-space:nowrap; }
-  #gauge .ok{ color:var(--hot); } #gauge .warn{ color:var(--run); } #gauge .bad{ color:var(--bad); }
-  #gauge .lbl{ color:var(--muted); }
-  #gauge .stale{ opacity:.5; }
+  #gauge .tok{ display:flex; gap:.35em; align-items:center; white-space:nowrap; padding:1px 4px; border:1px solid transparent; border-radius:6px; }
+  #gauge .tok.stale{ opacity:.5; }
+  #gauge .tn{ font-weight:700; }
+  /* one color per account — header dials, plane badges and the flight plan agree */
+  .tk1{ color:#5fb8ff; } .tk2{ color:#ff8fd0; }
+  #gauge .lgrid{ display:grid; grid-template-columns:auto 1fr; gap:1px 4px; align-items:center; }
+  #gauge .lb{ font-size:7px; line-height:1; color:var(--dim); text-align:right; }
+  #gauge .lb.warn{ color:var(--run); } #gauge .lb.crit{ color:var(--bad); }
+  #gauge .bstack{ display:flex; flex-direction:column; gap:1px; }
+  #gauge .sec{ margin-top:3.5px; }
+  #gauge .bar{ width:56px; height:3px; background:var(--rule); border-radius:1.5px; overflow:hidden; }
+  #gauge .bar i{ display:block; height:100%; background:var(--hot); border-radius:1.5px; }
+  #gauge .bar.use.warn i{ background:var(--run); } #gauge .bar.use.crit i{ background:var(--bad); }
+  #gauge .bar.time{ height:1.5px; } #gauge .bar.time i{ background:#5d84a9; }
+  #gauge .asof{ color:var(--dim); } #gauge .dial.crit{ color:var(--bad); }
+  #gauge button{ background:transparent; border:1px solid var(--rule); color:var(--muted); border-radius:6px; padding:0 5px; font-size:10px; cursor:pointer; }
+  #gauge button:disabled{ opacity:.5; cursor:wait; }
+
 
   /* hover card: every subscription-limit window the API reports */
   #gaugetip{
@@ -355,6 +410,10 @@
   .text.md th,.text.md td{ border:1px solid var(--rule); padding:4px 9px; text-align:left; }
   .text.md th{ background:var(--panel2); }
   .htmlframe{ width:100%; height:min(430px,55vh); border:1px solid var(--rule); border-radius:8px; background:#fff; margin-top:4px; }
+  .pastethumbs{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .pastethumbs img{ max-width:min(260px,70vw); max-height:200px; border:1px solid var(--rule); border-radius:6px; cursor:zoom-in; background:var(--panel2); min-width:40px; min-height:30px; }
+  .pastethumbs img.big{ max-width:100%; max-height:none; cursor:zoom-out; }
+  #composer.dropping{ outline:2px dashed var(--accent); outline-offset:-4px; }
 
   /* ---------- composer ---------- */
   footer{
@@ -387,7 +446,7 @@
     color:var(--ink); font:600 12px -apple-system,sans-serif; padding:10px 6px;
   }
   #dictate,#whisper{ flex:1; }
-  #brief{ flex:.45; }
+  #brief,#attach{ flex:.45; }
   #indent,#outdent{ flex:.35; }
   #indent.act{ border-color:var(--accent); color:var(--accent); }
   #outdent{ display:none; }
@@ -398,15 +457,39 @@
   #runbtn{ flex:1.1; background:linear-gradient(180deg,#3a2c12 0%,#22190a 100%); border-color:var(--accent); }
   #runbtn.stop{ background:linear-gradient(180deg,#4a1a14 0%,#2a0e0a 100%); border-color:var(--bad); color:#ff9c8a; }
   #runbtn:disabled{ opacity:.4; }
+  #runbtn.queue{ background:linear-gradient(180deg,#2a2342 0%,#17122a 100%); border-color:var(--new); color:#d4bfff; }
+  #stopbtn{ display:none; flex:.4; background:linear-gradient(180deg,#4a1a14 0%,#2a0e0a 100%); border-color:var(--bad); color:#ff9c8a; }
+  #stopbtn.on{ display:block; }
+  .who .qd{ color:var(--new); }
+  .plane .meta .qm{ color:var(--new); }
   .hintline{ color:var(--dim); font-size:10px; text-align:center; margin-top:6px; font-family:ui-monospace,Menlo,monospace; min-height:12px; }
+  /* phones, cramped on purpose: row 1 = ‹ title · status · buttons; row 2 = the sub line
+     (≤3 tiny lines) on the left, the dashboard (mem/swap stacked like the dials) on the right */
+  @media (max-width:600px){
+    header{ flex-wrap:wrap; row-gap:1px; column-gap:5px; padding:3px 6px 2px; }
+    header button{ padding:1px 6px; font-size:12px; border-radius:6px; }
+    header b{ font-size:13px; }
+    header .stat{ margin-left:auto; }
+    .hbreak{ display:block; order:9; flex:0 0 100%; height:0; }
+    header .sub{ order:10; flex:1 1 0; min-width:0; font-size:8.5px; line-height:1.15; }
+    #dash{ order:11; flex:0 0 auto; margin-left:0; gap:.4em; }
+    #gauge, #mem{ gap:.3em; }
+    #gauge .tok{ padding:0 1px; }
+    #gauge .bar{ width:26px; }
+    #gauge button{ padding:0 3px; }
+    #mem .bar{ width:26px; }
+    #mem .rss{ display:none; }
+  }
 </style>
 </head>
 <body>
   <header id="hdr">
     <button id="back" style="display:none">‹</button>
+    <img id="hdr-icon" alt="">
     <b id="hdr-title">✈ airport</b>
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
-    <span id="gauge"></span>
+    <span class="hbreak"></span>
+    <span id="dash"><span id="mem"></span><span id="gauge"></span></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span></span>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
@@ -414,7 +497,7 @@
   </header>
   <div id="gaugetip"></div>
 
-  <div id="tarmac"><div id="apron"><button id="addplane">＋</button></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
+  <div id="tarmac"><div id="apron"><button id="addplane">＋</button><div id="selbox"></div></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
   <div id="cols">
     <div id="explorer"></div>
@@ -432,9 +515,13 @@
       <button id="dictate">📱 dictate</button>
       <button id="whisper">☁︎ whisper</button>
       <button id="brief" title="add a box that briefs claude on how airport works">🧭</button>
+      <button id="attach" title="attach an image/file (or just paste / drop one into the box) — it's saved into the session's cwd and referenced in your message">📎</button>
+      <input type="file" id="attachfile" multiple style="display:none">
       <button id="indent" title="detour — new boxes indent; ✕ on the detour bar zaps them all later">⇥</button>
       <button id="outdent" title="back to the main line (keeps the detour's boxes)">⇤</button>
       <button id="addbox">＋ box</button>
+      <button id="pumpbtn" title="⛽ pump — zaps the previous pump turn (warm ✂ trim back to the base) and sends this plane's pump message again">⛽ pump</button>
+      <button id="stopbtn" title="◼ stop this turn (queued boxes stay — ⚡ sends them)">◼</button>
       <button id="runbtn">⚡ run</button>
     </div>
         <div class="hintline" id="hintline"></div>
@@ -597,11 +684,24 @@ function isUnread(s){
 }
 function hint(t){ $("hintline").textContent = t || ""; }
 const PLANES = ["🛩","✈️","🛫","🛬","🚁","🛸","🚀","🎈"];
+// plane image (anyone can POST /icon): served by the tower
+function iconUrl(id, s){ return s && s.iconV ? BASE + "/icon/" + encodeURIComponent(id) + ".png?v=" + s.iconV : null; }
+function iconImg(id, s, cls){ const u = iconUrl(id, s); return u ? `<img class="${cls}" src="${esc(u)}" alt="" draggable="false" onerror="this.remove()">` : ""; }
 function emojiFor(id, s){ if (s.emoji) return s.emoji; let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PLANES[h % PLANES.length]; }
-const MODELS = ["claude-fable-5","claude-opus-5","claude-sonnet-5","claude-haiku-4-5"];
+const MODELS = ["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5"];
 // a session pinned to a model that's no longer listed (retired, or set outside
 // the UI) keeps its own option — otherwise the select would silently show, and
 // on the next edit save, the wrong model
+// token = which subscription account the plane flies on: "" auto (airfield's sticky
+// failover) or a pinned 1/2. Pinned planes still fail over for a turn if their account's
+// allowance is hit (they stay pinned; the tile chip gets an amber ring).
+function tokenOpts(cur){
+  const n = Math.max(2, ...Object.values(hosts()).map((h) => Number(h && h.tokens) || 0));
+  const c = Number(cur) || 0;
+  let o = `<option value=""${c ? "" : " selected"}>auto</option>`;
+  for (let i = 1; i <= n; i++) o += `<option value="${i}"${c === i ? " selected" : ""}>t${i}</option>`;
+  return o;
+}
 const modelOpts = (cur) => (MODELS.includes(cur) ? MODELS : [...MODELS, cur])
   .map(m => `<option value="${esc(m)}"${m === cur ? " selected" : ""}>${esc(m.replace("claude-",""))}</option>`).join("");
 
@@ -631,6 +731,7 @@ function connect(){
       }
       return;
     }
+    if (m.type === "mem") { renderMem(m); return; }
     if (m.type === "delta") { shelf_merge(doc, m.delta); render(); checkPageVer(); return; }
     if (m.type === "auth-failed") { gated = true; try { ws.close(); } catch(_){} renderGate(); return; }
     if (m.type === "run-failed") { hint("✗ " + (m.error || "run failed")); render(); return; }
@@ -720,26 +821,92 @@ function untilTxt(ms){
   return Math.floor(s / 3600) + "h" + Math.round((s % 3600) / 60) + "m";
 }
 function sevCls(x){ return x >= 0.85 ? "bad" : x >= 0.6 ? "warn" : "ok"; }
-function gaugeBar(x){ const n = Math.max(0, Math.min(8, Math.round((x || 0) * 8))); return "▮".repeat(n) + "▯".repeat(8 - n); }
+// the header dials — per token, one use-bar per bucket (5h · 7d · f7d = 7d_oi fable
+// weekly); the 5h bar and the last weekly bar each carry a thin "window elapsed" bar under them.
+const LIMIT_BUCKETS = [["5h", "5h"], ["7d", "7d"], ["7d_oi", "f7d"]];
+const LIMIT_WIN = { "5h": 5 * 3600e3, "7d": 7 * 86400e3 };
+const fmtReset = (ms) => ms ? new Date(ms).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "?";
+const useCls = (pct) => pct >= 90 ? " crit" : pct >= 75 ? " warn" : "";
+function timeBar(win, reset, label){
+  const ePct = reset ? Math.round(Math.max(0, Math.min(1, 1 - (reset - Date.now()) / LIMIT_WIN[win])) * 100) : null;
+  return `<span class="bar time" title="${ePct === null ? "?" : ePct}% of the ${label} window elapsed · resets ${esc(fmtReset(reset))}"><i style="width:${ePct || 0}%"></i></span>`;
+}
+function usageBuckets(a){ // doc.usage[k] → { "5h": {util, reset, status}, … } from the verbatim headers
+  let all = null; try { all = JSON.parse(a.hdrs || ""); } catch (_) {}
+  if (!all) all = { "5h-utilization": a.five, "5h-reset": (a.fiveReset || 0) / 1000, "7d-utilization": a.seven, "7d-reset": (a.sevenReset || 0) / 1000 };
+  const bk = {};
+  for (const [k] of LIMIT_BUCKETS) if (all[k + "-utilization"] != null)
+    bk[k] = { util: Number(all[k + "-utilization"]) || 0, reset: (Number(all[k + "-reset"]) || 0) * 1000 || null, status: all[k + "-status"] || null };
+  return bk;
+}
+let usageProbeT = null, usageSig = "";
 function renderGauge(){
   const g = $("gauge");
   const u = (doc[0] && doc[0].usage) || {};
   const keys = Object.keys(u).sort();
   if (!keys.length) { g.innerHTML = ""; hideGaugeTip(); return; }
-  const spans = [];
-  for (const k of keys) {
+  const newest = Math.max(0, ...keys.map((k) => (u[k] || {}).at || 0));
+  const sig = keys.map((k) => (u[k] || {}).at).join(",");
+  if (sig !== usageSig) { usageSig = sig; clearTimeout(usageProbeT); usageProbeT = null; } // a probe landed → ↻ settles
+  const rows = keys.map((k) => {
     const a = u[k] || {};
-    const tag = CIRC[+k] || k;
-    if (a.err) { spans.push(`<span class="acct stale">${tag}<span class="bad">✗</span></span>`); continue; }
     const stale = !a.at || Date.now() - a.at > 25 * 60_000;
-    spans.push(`<span class="acct${stale ? " stale" : ""}">${tag}<span class="${sevCls(a.five)}">${gaugeBar(a.five)}${Math.round((a.five || 0) * 100)}%</span>${a.seven >= 0.5 ? ` <span class="${sevCls(a.seven)}">7d${Math.round(a.seven * 100)}%</span>` : ""}</span>`);
-  }
-  g.innerHTML = spans.join("");
+    const open = `<span class="tok${stale ? " stale" : ""}"><span class="tn tk${esc(k)}">t${esc(k)}</span>`;
+    if (a.err) return open + `<span class="dial crit" title="${esc(String(a.err))}">probe failed</span></span>`;
+    const bk = usageBuckets(a), present = LIMIT_BUCKETS.filter(([b]) => bk[b]), lastK = present.length ? present[present.length - 1][0] : null;
+    const cells = [];
+    for (const [b, lab] of present) {
+      const x = bk[b], pct = Math.round(x.util * 100), cls = useCls(pct);
+      const sec = b !== "5h" && present[0][0] !== b && (b === "7d" || !bk["7d"]) ? " sec" : "";
+      const title = `${lab}${b === "7d_oi" ? " (API bucket 7d_oi — fable weekly)" : ""} · ${pct}% used · resets ${esc(fmtReset(x.reset))}${x.status && x.status !== "allowed" ? " · " + esc(x.status) : ""}`;
+      const use = `<span class="bar use${cls}${b === lastK || b === "5h" ? "" : sec}" title="${title}"><i style="width:${Math.min(100, pct)}%"></i></span>`;
+      let stack = use;
+      if (b === "5h") stack = `<span class="bstack">${use}${timeBar("5h", x.reset, "5-hour")}</span>`;
+      else if (b === lastK) stack = `<span class="bstack${sec}">${use}${timeBar("7d", (bk["7d"] || {}).reset || (bk["7d_oi"] || {}).reset, "7-day")}</span>`;
+      cells.push(`<span class="lb${cls}${sec}" title="${title}">${lab}</span>${stack}`);
+    }
+    return open + `<span class="lgrid">${cells.join("")}</span></span>`;
+  }).join("");
+  g.innerHTML = rows + `<span class="asof" title="last probe">${newest ? ago(newest) : ""}</span>` +
+    `<button id="limref" title="probe both tokens now (one 1-token call each; at most one probe per 90 s)"${usageProbeT ? " disabled" : ""}>${usageProbeT ? "…" : "↻"}</button>`;
+  $("limref").addEventListener("click", (e) => {
+    e.stopPropagation();
+    send({ type: "usage-probe" });
+    clearTimeout(usageProbeT); usageProbeT = setTimeout(() => { usageProbeT = null; renderGauge(); }, 20000);
+    renderGauge();
+  });
   if ($("gaugetip").classList.contains("on")) fillGaugeTip();  // live refresh while hovered
 }
 
+// ---------- box meter: RAM · swap · ✻ claude processes ----------
+const fmtB = (b) => b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(1) + "G" : Math.round(b / 1024 ** 2) + "M";
+let memLast = null;
+function renderMem(d){
+  if (d) memLast = d; d = memLast;
+  const el = $("mem");
+  if (!d || !d.total) { el.innerHTML = ""; return; }
+  const used = d.total - d.avail, pct = Math.round(used / d.total * 100), cls = useCls(pct);
+  const sw = d.swapTotal ? d.swapTotal - d.swapFree : 0, spct = d.swapTotal ? Math.round(sw / d.swapTotal * 100) : 0, scls = useCls(spct);
+  const pr = d.procs || {}, cl = pr.claude || { n: 0, rss: 0 }, cx = pr.codex || { n: 0, rss: 0 };
+  const flying = Object.entries(sessions()).filter(([, s]) => s && s.running);
+  const byHost = {}; for (const [, s] of flying) byHost[s.host || "?"] = (byHost[s.host || "?"] || 0) + 1;
+  el.classList.toggle("stale", Date.now() - (d.at || 0) > 45_000);
+  el.title = `${d.host || "box"} memory (as of ${new Date(d.at).toLocaleTimeString()})\n` +
+    `RAM: ${fmtB(used)} used of ${fmtB(d.total)} (${pct}%) · ${fmtB(d.avail)} available\n` +
+    (d.swapTotal ? `swap: ${fmtB(sw)} of ${fmtB(d.swapTotal)} (${spct}%)\n` : "") +
+    `✻ claude processes on ${d.host || "box"}: ${cl.n} · ${fmtB(cl.rss)} RSS (airport turns + everything else)\n` +
+    (cx.n ? `☀ codex: ${cx.n} · ${fmtB(cx.rss)}\n` : "") +
+    `✈ airport turns flying: ${flying.length}${flying.length ? " (" + Object.entries(byHost).map(([h, n]) => h + " " + n).join(", ") + ")" : ""}\n` +
+    `load: ${(d.load || []).map((x) => x.toFixed(2)).join(" ")} on ${d.cpus} cpu`;
+  el.innerHTML = `<span class="mgrid"><span class="lb${cls}">mem</span><span class="bar${cls}"><i style="width:${pct}%"></i></span><span class="v${cls}">${pct}%</span>` +
+    (d.swapTotal ? `<span class="lb${scls} sw">swap</span><span class="bar${scls} sw"><i style="width:${spct}%"></i></span><span class="v${scls} sw">${spct}%</span>` : "") + `</span>` +
+    `<span class="cl">✻${cl.n}</span><span class="rss">${fmtB(cl.rss)}</span>` +
+    (cx.n ? `<span class="cl">☀${cx.n}</span><span class="rss">${fmtB(cx.rss)}</span>` : "");
+}
+setInterval(() => renderMem(), 15000); // greys out if the tower stops pushing
+
 // ---------- the gauge hover card: every limit window the API reports ----------
-const WIN_LABEL = { "5h": "5h", "7d": "week" };  // friendlier names where we have them
+const WIN_LABEL = { "5h": "5h", "7d": "7d", "7d_oi": "f7d" };  // same names as the header dials  // friendlier names where we have them
 function tipBar(x){ const n = Math.max(0, Math.min(12, Math.round((x || 0) * 12))); return "▮".repeat(n) + "▯".repeat(12 - n); }
 function fillGaugeTip(){
   const tip = $("gaugetip");
@@ -750,7 +917,7 @@ function fillGaugeTip(){
     const a = u[k] || {};
     const tag = CIRC[+k] || k;
     const activeOn = Object.keys(hh).filter((h) => hh[h] && String(hh[h].activeToken || 1) === k && hostUp(h));
-    const rows = [`<div class="acctrow">${tag} account ${esc(k)}${activeOn.length ? ` <span class="meta">· flying ${esc(activeOn.join("+"))}</span>` : ""}<span class="when">${a.at ? "probed " + ago(a.at) : ""}</span></div>`];
+    const rows = [`<div class="acctrow">t${esc(k)} · account ${esc(k)}${activeOn.length ? ` <span class="meta">· flying ${esc(activeOn.join("+"))}</span>` : ""}<span class="when">${a.at ? "probed " + ago(a.at) : ""}</span></div>`];
     if (a.err) rows.push(`<div class="bad">✗ ${esc(a.err)}</div>`);
     else {
       let all = null;
@@ -790,6 +957,8 @@ window.addEventListener("resize", hideGaugeTip);
 
 // ---------- the tarmac (the square apron; everything scales with --S) ----------
 let dragState = null;
+const selected = new Set();    // multi-select (rubber band / ⌘-click): these move as one
+let bandState = null;          // rubber band in progress: { sx, sy (apron px), moved, add, base:Set }
 const DISC = 0.125;            // disc side as a fraction of the apron side
 let APRON_S = 300;             // the apron's set side. Drag math MUST use this, not
                                // clientWidth (which excludes the border → release jump)
@@ -799,8 +968,12 @@ function renderTarmac(){
   $("back").style.display = "none";
   $("termbtn").style.display = "none";
   $("hdr-title").textContent = "✈ airport";
+  $("hdr-icon").classList.remove("on");
   const hh = hosts(), up = Object.keys(hh).filter(hostUp);
-  $("hdr-sub").textContent = up.length ? "airfields up: " + up.join(", ") : "no ground crew online";
+  for (const id of [...selected]) if (!sessions()[id]) selected.delete(id);  // deleted under us
+  $("hdr-sub").textContent = selected.size
+    ? `${selected.size} selected — drag one to move them together · tap empty tarmac (or Esc) to clear`
+    : up.length ? "airfields up: " + up.join(", ") : "no ground crew online";
   composer.classList.remove("on");
   feedEl.classList.remove("on");
   colsEl.classList.remove("on");
@@ -837,8 +1010,9 @@ function renderTarmac(){
     el.classList.toggle("running", !isNote && !!s.running);
     el.classList.toggle("hot", !isNote && !s.running && isHot(s));
     el.classList.toggle("offline", !isNote && s.state === "offline");
+    el.classList.toggle("sel", selected.has(id));
     el.title = s.title || id;
-    if (dragState?.id !== id) {
+    if (!(dragState && dragState.group.has(id))) {
       const x = clampX(typeof s.x === "number" ? s.x : 0.5);
       const y = clampY(typeof s.y === "number" ? s.y : 0.5);
       el.style.left = (x * S) + "px";   // tile center (translate(-50%,-50%))
@@ -848,50 +1022,112 @@ function renderTarmac(){
         ? `<span class="runm">✈${fmtFly(Date.now() - (s.startedAt || Date.now()))}</span>`
         : isHot(s) ? `<span class="hotm">${ago(s.lastRunEndedAt)}</span>` // green tint + ring = hot; no word needed
         : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
+      const qn = isNote ? 0 : Object.values(s.messages || {}).filter((b) => b && b.queued && !b.synced).length;
+      // token tag after the host: the account it last flew on
+      const tk = isNote ? 0 : Number(s.lastToken) || Number(s.token) || 0, pin = Number(s.token) || 0;
+      const tokTag = tk ? `<span class="tkc tk${tk}${pin ? "" : " auto"}${pin && pin !== tk ? " over" : ""}" title="${
+        pin ? (pin !== tk ? `pinned to t${pin}, but the last turn failed over to t${tk}` : `pinned to t${pin}`) : `auto — last flew on t${tk}`}">t${tk}</span>` : "";
       const metaLine = isNote
         ? `<span class="hostm">note</span>·${s.editedAt ? ago(s.editedAt) : "new"}`
-        : `<span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>·${fmtTok(s.totalTokens)}·${meta}`;
-      el.innerHTML = `
+        : `<span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>${tokTag ? "·" + tokTag : ""}·${s.running ? "" : fmtTok(s.totalTokens) + "·"}${meta}${qn ? `·<span class="qm" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</span>` : ""}`;
+      const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
-        <div class="emoji">${esc(emojiFor(id, s))}</div>
+        <div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(emojiFor(id, s))}</span></div>
         <div class="name">${esc(s.title || id)}</div>
         <div class="meta">${metaLine}</div>`;
+      if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
 }
 function clampX(x){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, x)); }
 function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, y)); }
+function planeEl(id){ return $("apron").querySelector(`.plane[data-id="${CSS.escape(id)}"]`); }
 function wirePlane(el){
   el.addEventListener("pointerdown", (e) => {
     e.preventDefault();
+    e.stopPropagation();   // not a rubber band
     el.setPointerCapture(e.pointerId);
-    dragState = { el, id: el.dataset.id, sx: e.clientX, sy: e.clientY,
-                  ox: parseFloat(el.style.left), oy: parseFloat(el.style.top), moved: false };
+    const id = el.dataset.id;
+    // grabbing a selected plane carries the whole selection; any other plane flies solo
+    const ids = selected.has(id) ? [...selected] : [id];
+    const group = new Map();
+    for (const gid of ids) { const g = planeEl(gid); if (g) group.set(gid, { el: g, ox: parseFloat(g.style.left), oy: parseFloat(g.style.top) }); }
+    dragState = { el, id, sx: e.clientX, sy: e.clientY, group, moved: false,
+                  toggle: e.metaKey || e.ctrlKey || e.shiftKey };
   });
   el.addEventListener("pointermove", (e) => {
     if (!dragState || dragState.el !== el) return;
-    const dx = e.clientX - dragState.sx, dy = e.clientY - dragState.sy;
+    let dx = e.clientX - dragState.sx, dy = e.clientY - dragState.sy;
     if (!dragState.moved && Math.hypot(dx, dy) < 8) return;
     dragState.moved = true;
-    el.classList.add("dragging");
-    const S = APRON_S;
-    el.style.left = (clampX((dragState.ox + dx) / S) * S) + "px";
-    el.style.top = (clampY((dragState.oy + dy) / S) * S) + "px";
+    // clamp the group as a block: the move stops when ANY member hits an edge
+    const S = APRON_S, lo = (DISC/2 + 0.015) * S, hi = (1 - DISC/2 - 0.015) * S;
+    for (const g of dragState.group.values()) {
+      dx = Math.max(lo - g.ox, Math.min(hi - g.ox, dx));
+      dy = Math.max(lo - g.oy, Math.min(hi - g.oy, dy));
+    }
+    for (const g of dragState.group.values()) {
+      g.el.classList.add("dragging");
+      g.el.style.left = (g.ox + dx) + "px";
+      g.el.style.top = (g.oy + dy) + "px";
+    }
   });
   el.addEventListener("pointerup", () => {
     if (!dragState || dragState.el !== el) return;
     const d = dragState; dragState = null;
-    el.classList.remove("dragging");
+    for (const g of d.group.values()) g.el.classList.remove("dragging");
     if (d.moved) {
-      const S = APRON_S;
-      patch({ sessions: { [d.id]: {
-        x: clampX(parseFloat(el.style.left) / S),
-        y: clampY(parseFloat(el.style.top) / S) } } });
-    } else openSession(d.id);
+      const S = APRON_S, mp = {};
+      for (const [gid, g] of d.group) mp[gid] = { x: clampX(parseFloat(g.el.style.left) / S), y: clampY(parseFloat(g.el.style.top) / S) };
+      patch({ sessions: mp });   // one patch: the group lands together
+    } else if (d.toggle) {       // ⌘/ctrl/shift-click: add/remove from the selection
+      selected.has(d.id) ? selected.delete(d.id) : selected.add(d.id);
+      renderTarmac();
+    } else { selected.clear(); openSession(d.id); }
   });
-  el.addEventListener("pointercancel", () => { if (dragState?.el === el) { el.classList.remove("dragging"); dragState = null; } });
+  el.addEventListener("pointercancel", () => {
+    if (dragState?.el !== el) return;
+    for (const g of dragState.group.values()) g.el.classList.remove("dragging");
+    dragState = null; renderTarmac();
+  });
 }
+// ---- rubber band: drag on empty tarmac to select planes (centers inside the box) ----
+function apronXY(e){ const r = $("apron").getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+tarmacEl.addEventListener("pointerdown", (e) => {
+  if (view || e.button > 0 || e.target.closest(".plane, #addplane")) return;
+  const [x, y] = apronXY(e);
+  try { tarmacEl.setPointerCapture(e.pointerId); } catch (_) {}
+  const add = e.metaKey || e.ctrlKey || e.shiftKey;
+  bandState = { sx: x, sy: y, moved: false, add, base: new Set(add ? selected : []) };
+});
+tarmacEl.addEventListener("pointermove", (e) => {
+  if (!bandState) return;
+  const [x, y] = apronXY(e);
+  if (!bandState.moved && Math.hypot(x - bandState.sx, y - bandState.sy) < 6) return;
+  bandState.moved = true;
+  const x0 = Math.min(x, bandState.sx), y0 = Math.min(y, bandState.sy), x1 = Math.max(x, bandState.sx), y1 = Math.max(y, bandState.sy);
+  const box = $("selbox");
+  box.classList.add("on");
+  box.style.left = x0 + "px"; box.style.top = y0 + "px"; box.style.width = (x1 - x0) + "px"; box.style.height = (y1 - y0) + "px";
+  selected.clear();
+  for (const id of bandState.base) selected.add(id);
+  for (const el of $("apron").querySelectorAll(".plane")) {
+    const cx = parseFloat(el.style.left), cy = parseFloat(el.style.top);
+    if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) selected.add(el.dataset.id);
+  }
+  for (const el of $("apron").querySelectorAll(".plane")) el.classList.toggle("sel", selected.has(el.dataset.id));
+});
+function endBand(){
+  if (!bandState) return;
+  const b = bandState; bandState = null;
+  $("selbox").classList.remove("on");
+  if (!b.moved && !b.add) selected.clear();   // a plain tap on empty tarmac clears
+  if (!view) renderTarmac();
+}
+tarmacEl.addEventListener("pointerup", endBand);
+tarmacEl.addEventListener("pointercancel", endBand);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !view && selected.size) { selected.clear(); renderTarmac(); } });
 
 // ---------- create session (pure data — a session is born as a patch) ----------
 function hostOptions(sel){
@@ -909,7 +1145,7 @@ $("addplane").addEventListener("click", (e) => {
     <label>airfield (machine)</label><select id="f-host">${hostOptions(Object.keys(hh).find(hostUp) || "")}</select>
     <label>cwd (working directory)</label><input id="f-cwd" placeholder="" autocomplete="off">
     <label>model</label>
-    <select id="f-model">${modelOpts("claude-fable-5")}</select>
+    <select id="f-model">${modelOpts("claude-fable-5-1")}</select>
     <div class="btns"><button data-x>cancel</button><button id="f-note" title="a text file on the tarmac — lives in the shelf, no machine, no model">📝 note</button><button class="go" id="f-go">roll out 🛩</button></div>
     <div class="hint" id="f-err"></div>`,
   (ov) => {
@@ -1024,9 +1260,13 @@ const CFG_FIELDS = [
   ["c-emoji",   (s) => s.emoji || "🛩"],
   ["c-host",    (s) => s.host || ""],
   ["c-model",   (s) => s.model || "claude-fable-5"],
+  ["c-token",   (s) => String(Number(s.token) || "")],
   ["c-cwd",     (s) => s.cwd || ""],
   ["c-tools",   (s) => s.tools || ""],
   ["c-sys",     (s) => s.systemPrompt || ""],
+  ["c-pump",    (s) => s.pumpText || ""],
+  ["c-wake",    (s) => String(Number(s.wakeEvery) || "")],
+  ["c-waketext",(s) => s.wakeText || ""],
   ["c-sysmode", (s) => s.systemMode || "append"],
 ];
 function ensureCfg(){
@@ -1050,6 +1290,8 @@ function buildCfg(cfg){
         <select id="c-host">${hostOptions(s.host || "")}</select></div>
       <div><label>model <span class="warn">— change = cold cache</span></label>
         <select id="c-model">${modelOpts(s.model || "claude-fable-5")}</select></div>
+      <div style="flex:.6"><label>token <span class="warn">— change = cold cache</span></label>
+        <select id="c-token">${tokenOpts(s.token)}</select></div>
     </div>
     <label>cwd <span class="warn">— change = cold cache + new transcript home</span></label>
     <input id="c-cwd" value="${esc(s.cwd || "")}">
@@ -1061,6 +1303,11 @@ function buildCfg(cfg){
       <label class="ck"><input type="checkbox" id="c-memory"${s.useMemory !== false ? " checked" : ""}> memory <span>(MEMORY.md)</span></label>
       <label class="ck"><input type="checkbox" id="c-skills"${s.useSkills !== false ? " checked" : ""}> skills</label>
     </div>
+    <label>⛽ pump message <span class="warn">— set = a pump plane: ⛽ resends this, zapping the previous pump turn (never grows)</span></label>
+    <textarea id="c-pump" placeholder="empty = not a pump plane" style="min-height:44px">${esc(s.pumpText || "")}</textarea>
+    <label>⏰ wake every <span class="warn">— minutes (≥ 5; empty = off). The tower flies this plane on a timer: a pump plane pumps, others get the wake message. ${esc(s.wakeWait || (s.lastWakeAt ? "last wake " + new Date(s.lastWakeAt).toLocaleString() : ""))}</span></label>
+    <div class="ckrow"><input id="c-wake" type="number" min="5" step="5" placeholder="off" style="width:90px" value="${esc(String(Number(s.wakeEvery) || ""))}">
+    <input id="c-waketext" placeholder="wake message (non-pump planes; default ⏰ wake)" style="flex:1" value="${esc(s.wakeText || "")}"></div>
     <label>system prompt <span class="warn">— any change = cold cache next run</span></label>
     <textarea id="c-sys" placeholder="empty = claude code's default">${esc(s.systemPrompt || "")}</textarea>
     <select id="c-sysmode" style="margin-top:6px">
@@ -1078,6 +1325,8 @@ function buildCfg(cfg){
     patch({ sessions: { [id]: { host: el.value } } });
     chint("flying to " + el.value + " — next ⚡ rebuilds the transcript there (one cold read)");
   });
+  on("c-token", (el) => { patch({ sessions: { [id]: { token: Number(el.value) || null } } });
+    chint(el.value ? "pinned to t" + el.value + " — next run pays a cold prefix (cache is per account)" : "token: auto — follows the airfield's failover"); });
   on("c-model", (el) => { patch({ sessions: { [id]: { model: el.value } } }); chint("model changed — next run pays a cold prefix"); });
   on("c-cwd", (el) => {
     const cwd = el.value.trim();
@@ -1091,6 +1340,10 @@ function buildCfg(cfg){
   on("c-memory", (el) => { patch({ sessions: { [id]: { useMemory: el.checked ? null : false } } }); chint("context changed — cold cache next run"); });
   on("c-skills", (el) => { patch({ sessions: { [id]: { useSkills: el.checked ? null : false } } }); chint("context changed — cold cache next run"); });
   on("c-sys", (el) => { patch({ sessions: { [id]: { systemPrompt: el.value.trim() ? el.value : null } } }); chint("system prompt saved — cold prefix next run"); });
+  on("c-pump", (el) => { patch({ sessions: { [id]: { pumpText: el.value.trim() ? el.value : null } } }); chint(el.value.trim() ? "⛽ pump plane — the ⛽ button resends this" : "no longer a pump plane"); });
+  on("c-wake", (el) => { const n = Math.round(Number(el.value) || 0); const v = n >= 5 ? n : null;
+    patch({ sessions: { [id]: { wakeEvery: v, wakeWait: null } } }); chint(v ? `⏰ wakes every ${v} min` : "⏰ timer off"); });
+  on("c-waketext", (el) => patch({ sessions: { [id]: { wakeText: el.value.trim() ? el.value : null } } }));
   on("c-sysmode", (el) => patch({ sessions: { [id]: { systemMode: el.value } } }));
   cfg.querySelector("#c-fork").addEventListener("click", () => {
     const s2 = sess(id);
@@ -1103,7 +1356,7 @@ function buildCfg(cfg){
     // Fallback (no sid / edited history): mirror fork — text-only rebuild via dirty.
     const real = !!(s2.claudeSessionId && !s2.dirty && s2.sidHost && s2.cwd); // empty cwd remaps per-id → parent transcript unreachable
     patch({ sessions: { [fid]: Object.assign({
-      title: (s2.title || id) + " ⑂", emoji: s2.emoji || "🛩", host: s2.host, cwd: s2.cwd, model: s2.model, tools: s2.tools,
+      title: (s2.title || id) + " ⑂", emoji: s2.emoji || "🛩", host: s2.host, cwd: s2.cwd, model: s2.model, token: s2.token || null, tools: s2.tools,
       systemPrompt: s2.systemPrompt, systemMode: s2.systemMode,
       useClaudeMd: s2.useClaudeMd || null, useMemory: s2.useMemory === false ? false : null, useSkills: s2.useSkills === false ? false : null,
       x: Math.min(0.9, (s2.x || 0.5) + 0.1), y: Math.min(0.85, (s2.y || 0.5) + 0.07),
@@ -1229,11 +1482,16 @@ function turnHtml(b, i, len){
   } else if (fmt === "html") body = `<div class="text"><iframe class="htmlframe" sandbox="allow-scripts" data-key="${b.key}"></iframe></div>`;
   else if (fmt === "md") body = `<div class="text md">${mdHtml(b.text || "")}</div>`;
   else body = `<div class="text">${esc(b.text || "")}</div>`;
+  if (editing !== b.key) {   // pasted/attached images → inline thumbnails (fetched via the fs relay)
+    const refs = [...(b.text || "").matchAll(PASTE_IMG_RE)].map(m => m[1]);
+    if (refs.length) body += `<div class="pastethumbs">${refs.map(r => `<img data-pimg="${esc(r)}" alt="${esc(r)}" title="${esc(r)}" onclick="this.classList.toggle('big')">`).join("")}</div>`;
+  }
   const st = b.stats;
   const statline = st ? `<div class="statline">
       <span>${fmtDur(st.ms)}</span><span>out ${fmtTok(st.out)}</span>
       <span class="cr">read ${fmtTok(st.cread)}</span><span class="cw">write ${fmtTok(st.cwrite)}</span>
-      <span>~$${Number(st.cost).toFixed(4)}</span></div>` : "";
+      ${st.v ? `<span title="this turn: its own token usage × the CLI's price table${st.total ? `\nsession total (the CLI's running total for this transcript): $${Number(st.total).toFixed(2)}` : ""}">${st.cost == null ? "$?" : "$" + Number(st.cost).toFixed(4)}${st.total ? ` · Σ$${Number(st.total).toFixed(2)}` : ""}</span>`
+        : `<span title="older turn: this figure is the CLI's running total for the whole transcript, not this turn's cost">Σ$${Number(st.cost).toFixed(2)}</span>`}</div>` : "";
   const del = confirming === b.key ? `
       <button class="bbtn danger" data-del="${b.key}">this box</button>
       <button class="bbtn danger" data-delbelow="${b.key}">＋ below</button>
@@ -1242,7 +1500,7 @@ function turnHtml(b, i, len){
   return `
   <div class="turn ${cls2}${b.err ? " err" : ""}${aside}">
     <div class="row1">
-      <span class="who" data-tgl="${b.key}">${WHO[b.role] || b.role}${b.synced ? "" : " ·pending"}</span>
+      <span class="who" data-tgl="${b.key}">${b.pump ? `<span class="pm">⛽</span> ` : ""}${WHO[b.role] || b.role}${b.synced ? "" : b.queued ? ` <span class="qd" title="${esc(qWait() || "goes out as the next turn when the current one lands")}">·⏭ queued${qWait() ? (qWait().startsWith("held") ? " (held)" : " (waiting)") : ""}</span>` : " ·pending"}</span>
       <span class="when" data-tgl="${b.key}" title="${b.ts ? esc(new Date(b.ts).toLocaleString()) : ""}">${fmtT(b.ts)}</span>
       <span class="grow"></span>
       <button class="bbtn${forced ? " forced" : ""}" data-fmt="${b.key}">${fmt}</button>
@@ -1260,10 +1518,12 @@ function renderSession(){
   if (noteEd) destroyNote();          // switched from a note to a real plane
   $("jumps").style.display = "";
   $("back").style.display = "block";
-  $("hdr-title").textContent = (s.emoji || emojiFor(view, s)) + " " + (s.title || view);
+  const hu = iconUrl(view, s), hi = $("hdr-icon");
+  if (hu) { if (hi.getAttribute("src") !== hu) { hi.onerror = () => hi.classList.remove("on"); hi.src = hu; } hi.classList.add("on"); } else hi.classList.remove("on");
+  $("hdr-title").textContent = (hu ? "" : (s.emoji || emojiFor(view, s)) + " ") + (s.title || view);
   const hot = s.running ? "flying" : isHot(s) ? `hot ${ago(s.lastRunEndedAt)}` : "cold";
   const off = !hostUp(s.host);
-  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}${(Number(s.indent) || 0) ? " · ⇥" + s.indent : ""}`;
+  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")}${s.lastToken || s.token ? " · t" + (s.lastToken || s.token) + (s.token ? "" : "(auto)") : ""} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}${(Number(s.indent) || 0) ? " · ⇥" + s.indent : ""}`;
   const ind = Number(s.indent) || 0;
   const ib = $("indent");
   ib.classList.toggle("act", ind > 0);
@@ -1284,7 +1544,7 @@ function renderSession(){
   feedEl.classList.toggle("on", !termOn);
   composer.classList.toggle("on", !termOn);
   if (wide) {
-    if (!exp[view]) { lastRunSeen[view] = s.lastRunEndedAt || 0; colsFor = view; renderExplorer(); renderFileView(); }
+    if (!exp[view]) { lastRunSeen[view] = s.lastRunEndedAt || 0; colsFor = view; if (expState().gitMode) loadGit(); else renderExplorer(); renderFileView(); }
     else if (colsFor !== view) { colsFor = view; lastRunSeen[view] = s.lastRunEndedAt || 0; refreshFs(); }  // columns still show another plane
     else if (s.lastRunEndedAt && lastRunSeen[view] !== s.lastRunEndedAt) { lastRunSeen[view] = s.lastRunEndedAt; refreshFs(); }
   }
@@ -1316,6 +1576,7 @@ function destroyNote(){
 }
 function renderNote(s){
   $("back").style.display = "block";
+  $("hdr-icon").classList.remove("on");
   $("hdr-title").textContent = (s.emoji || "📝") + " " + (s.title || view);
   const len = (s.text || "").length;
   $("hdr-sub").textContent = "note · " + (len ? s.text.split("\n").length + " lines · " + len + " chars" : "empty")
@@ -1407,8 +1668,9 @@ async function mountNote(s){
 // Rebuild ONLY boxes whose rendered state changed. Untouched DOM stays put — so
 // iframes with agent-authored HTML never reload on unrelated deltas (an iframe
 // reloads even on reparenting, so stability beats any vdom here).
+const qWait = () => (sess(view) || {}).queueWait || "";
 function boxSig(b, i, len){
-  return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.err, !!b.sys, !!b.brief, b.stats || null, b.depth || 0,
+  return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.queued, b.queued && !b.synced ? qWait() : "", !!b.err, !!b.sys, !!b.brief, b.stats || null, b.depth || 0,
     boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null]);
 }
 function reconcileFeed(msgs, s, boxes){
@@ -1456,6 +1718,7 @@ function reconcileFeed(msgs, s, boxes){
     fresh.dataset.bk = it.key; fresh.dataset.sig = sig;
     const fr = fresh.querySelector(".htmlframe");
     if (fr) fr.srcdoc = (it.b && it.b.text) || "";
+    fresh.querySelectorAll("img[data-pimg]").forEach(fillPasteImg);
     if (el) el.replaceWith(fresh);
     else msgs.insertBefore(fresh, prev ? prev.nextElementSibling : msgs.firstElementChild);
     prev = fresh;
@@ -1583,18 +1846,20 @@ function delBoxes(keys){
 // and with no files to copy into every cwd. Templated with THIS plane's setup.
 function briefingText(id, s){
   const onoff = (v) => v ? "ON" : "OFF";
+  const owner = String((doc[0] && doc[0].owner) || "").trim();   // AIRPORT_OWNER on the tower
+  const who = owner || "the user", Who = owner || "The user";
   return [
 "✈ AIRPORT BRIEFING — how this session is being driven (context, not a task)",
 "",
-"You are session \"" + id + "\" in airport, Greg's claude-session manager (github.com/dglittle/airport).",
+"You are session \"" + id + "\" in airport, " + (owner ? owner + "'s" : "a") + " claude-session manager (github.com/dglittle/airport).",
 "",
-"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". No turn time limit — though Greg can interrupt (◼) anytime, so for very long work, saving progress to files as you go is wise.",
-"- Your setup right now: cwd " + (s.cwd || "?") + " · model " + (s.model || "claude-fable-5") + " · context loading: CLAUDE.md " + onoff(!!s.useClaudeMd) + ", auto-memory " + onoff(s.useMemory !== false) + ", skills " + onoff(s.useSkills !== false) + ". Greg can change all of this (plus your system prompt, allowed tools, and even which machine you run on) from the UI.",
-"- The conversation you see is mirrored as editable \"boxes\" in the UI. Greg may edit or delete past boxes; after such an edit — or after moving you to another machine — your next turn runs on a transcript REBUILT from the visible text only: thinking and tool outputs are dropped. Under normal use your real transcript (tool results included) stays intact.",
+"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". No turn time limit — though " + who + " can interrupt (◼) anytime, so for very long work, saving progress to files as you go is wise.",
+"- Your setup right now: cwd " + (s.cwd || "?") + " · model " + (s.model || "claude-fable-5") + " · context loading: CLAUDE.md " + onoff(!!s.useClaudeMd) + ", auto-memory " + onoff(s.useMemory !== false) + ", skills " + onoff(s.useSkills !== false) + ". " + Who + " can change all of this (plus your system prompt, allowed tools, and even which machine you run on) from the UI.",
+"- The conversation you see is mirrored as editable \"boxes\" in the UI. " + Who + " may edit or delete past boxes; after such an edit — or after moving you to another machine — your next turn runs on a transcript REBUILT from the visible text only: thinking and tool outputs are dropped. Under normal use your real transcript (tool results included) stays intact.",
 "- One prompt may be several user boxes stacked together — treat them as one message in order.",
-"- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. Greg is often on his phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
+"- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. " + Who + " is often on a phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
 "- The UI has a file explorer + editor rooted at your cwd — writing files there is the best way to deliver artifacts (.html renders, .md renders, small images preview).",
-"- FORKING (branching a session): Greg uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus state:\"ready\" and x/y (0..1 tarmac fractions), THEN one of:",
+"- FORKING (branching a session): " + Who + " uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus state:\"ready\" and x/y (0..1 tarmac fractions), THEN one of:",
 "  · FULL-CONTEXT fork (preferred — keeps tool results + thinking): also copy claudeSessionId + sidHost from the source and set dirty:false, forkNext:true. The fork's first ⚡ runs `--resume <parent> --fork-session`: the CLI branches the real transcript under a new session id. One cold cache write of the full context (session-scoped prompt cache follows the session id, so forks can't cache-hit the parent — measured, not folklore).",
 "  · MIRROR fork (cheap, text-only): set dirty:true instead. First ⚡ rebuilds from the visible conversation only.",
 "",
@@ -1629,10 +1894,33 @@ $("addbox").addEventListener("click", () => {
   $("box").value = ""; autoGrow(); saveDraft();
   hint("box stowed (pending) — stack more, or ⚡ to run");
 });
+$("pumpbtn").addEventListener("click", () => {
+  if (!view) return;
+  const s = sess(view);
+  if (s.running) { hint("⛽ already flying — pump again when it lands"); return; }
+  if (!(doc[0].towerFeatures || {}).pump) { hint("this tower can't pump yet (restart pending)"); return; }
+  send({ type: "pump", session: view });
+  hint("⛽ pumped — previous pump turn zapped, fresh one taking off");
+});
+$("stopbtn").addEventListener("click", () => { if (view && sess(view).running) send({ type: "interrupt", session: view }); });
 $("runbtn").addEventListener("click", () => {
   if (!view) return;
   const s = sess(view);
-  if (s.running) { send({ type: "interrupt", session: view }); return; }
+  if (s.running) {   // ⏭ queue: rides as the next turn once this one lands cleanly
+    if (mode) stopMode("sending");
+    const text = $("box").value.trim();
+    if (!text) { hint("⏭ type (or dictate) the message to queue — it goes out when this turn lands · ◼ stops"); return; }
+    if (!(doc[0].towerFeatures || {}).queue) {   // older tower (restart pending): stow it instead
+      send({ type: "addbox", session: view, text });
+      $("box").value = ""; autoGrow(); saveDraft();
+      hint("stowed as a pending box (this tower can't auto-queue yet) — ⚡ it after landing");
+      return;
+    }
+    send({ type: "queue", session: view, text });
+    $("box").value = ""; autoGrow(); saveDraft();
+    hint("⏭ queued — it flies as the next turn when this one lands");
+    return;
+  }
   if (mode) stopMode("sending");
   const text = $("box").value.trim();
   $("box").value = ""; autoGrow(); saveDraft();
@@ -1643,8 +1931,10 @@ setInterval(() => {
   if (!view) return;
   const s = sess(view);
   const rb = $("runbtn");
-  if (s.running && !rb.classList.contains("stop")) { rb.classList.add("stop"); rb.textContent = "◼ stop"; }
-  if (!s.running && rb.classList.contains("stop")) { rb.classList.remove("stop"); rb.textContent = "⚡ run"; }
+  if (s.running && !rb.classList.contains("queue")) { rb.classList.add("queue"); rb.textContent = "⏭ queue"; }
+  if (!s.running && rb.classList.contains("queue")) { rb.classList.remove("queue"); rb.textContent = "⚡ run"; }
+  $("stopbtn").classList.toggle("on", !!s.running);
+  $("pumpbtn").classList.toggle("on", !s.running && !!(s.pumpText && String(s.pumpText).trim()));
 }, 300);
 
 // ---------- composer: box + dictate + whisper ----------
@@ -1673,6 +1963,106 @@ function appendText(t){
   autoGrow(); saveDraft();
   box.scrollTop = box.scrollHeight;
 }
+
+// ---------- composer: paste / drop / 📎 images & files ----------
+// The bytes go into the session's cwd (.airport-uploads/, via the fs relay —
+// works on any airfield) and the composer gets a plain-text ref like
+// "[image: .airport-uploads/paste-1016-2231-ab12.png]". Claude views it with
+// its Read tool. Plain text = survives rebuilds, forks, flying, edits.
+const UPLOAD_DIR = ".airport-uploads";
+var PASTE_IMG_RE = /\[image: (\.airport-uploads\/[^\]\s]+)\]/g;
+const MAX_IMG_SIDE = 2000, MAX_UPLOAD = 15 * 1024 * 1024;
+const pasteImgCache = {};   // `${session}:${rel}` -> Promise<dataURL|null>
+function fillPasteImg(img){
+  const rel = img.dataset.pimg, k = view + ":" + rel;
+  const p = pasteImgCache[k] || (pasteImgCache[k] = fsRaw("read", rel).then(r =>
+    r.ok && r.b64 ? `data:${r.mime};base64,${r.b64}` : (delete pasteImgCache[k], null)));
+  p.then(u => { if (u) img.src = u; else img.alt = "⚠ couldn't load " + rel; });
+}
+function insertAtCursor(t){
+  const a = box.selectionStart ?? box.value.length, z = box.selectionEnd ?? a;
+  const before = box.value.slice(0, a), after = box.value.slice(z);
+  const pre = before && !/\s$/.test(before) ? " " : "", post = after && !/^\s/.test(after) ? " " : "";
+  box.value = before + pre + t + post + after;
+  const c = (before + pre + t + post).length;
+  box.setSelectionRange(c, c);
+  autoGrow(); saveDraft();
+}
+const blobToDataUrl = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+async function shrinkImage(file){
+  // big photos/screenshots → ≤2000px (the model downsamples anyway); keeps uploads + thumbnails light
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return file;
+  let bmp; try { bmp = await createImageBitmap(file); } catch (_) { return file; }
+  const scale = Math.min(1, MAX_IMG_SIDE / Math.max(bmp.width, bmp.height));
+  if (scale === 1 && file.size <= 1.5e6) return file;
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(bmp.width * scale); cv.height = Math.round(bmp.height * scale);
+  cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+  const toBlob = (type, q) => new Promise(r => cv.toBlob(r, type, q));
+  let out = file.type === "image/png" ? await toBlob("image/png") : null;
+  if (!out || out.size > 1.5e6) out = await toBlob("image/jpeg", 0.88);
+  return out && out.size < file.size ? out : file;
+}
+const EXT_OF = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
+async function uploadFiles(files){
+  if (!view || !files.length) return;
+  const s = sess(view);
+  if (s.kind === "note") return;
+  const sid = view;
+  for (const f0 of files) {
+    const isImg = /^image\//.test(f0.type);
+    const f = isImg ? await shrinkImage(f0) : f0;
+    if (f.size > MAX_UPLOAD) { hint(`📎 ${f0.name || "file"} is too big (${fmtSize(f.size)} > ${fmtSize(MAX_UPLOAD)})`); continue; }
+    const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+    const stamp = pad(d.getMonth() + 1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    const rnd = Math.random().toString(36).slice(2, 6);
+    let name;
+    if (isImg) name = `paste-${stamp}-${rnd}.${EXT_OF[f.type] || (f0.name || "").split(".").pop() || "png"}`;
+    else {
+      const base = (f0.name || "file").replace(/[^\w.\-]+/g, "_").replace(/^\.+/, "").slice(-80) || "file";
+      name = `${stamp}-${rnd}-${base}`;
+    }
+    const rel = `${UPLOAD_DIR}/${name}`;
+    const ref = isImg ? `[image: ${rel}]` : `[file: ${rel}]`;
+    insertAtCursor(ref);
+    hint(`📎 uploading ${name}…`);
+    let r;
+    try {
+      const b64 = (await blobToDataUrl(f)).split(",")[1] || "";
+      r = await fsRaw("write", rel, { b64 });
+      if (r.ok && r.size !== f.size) r = { ok: false, error: "the ground crew on this airfield is too old for uploads (restart it)" };
+      if (r.ok && isImg) pasteImgCache[sid + ":" + rel] = Promise.resolve(await blobToDataUrl(f));
+    } catch (e) { r = { ok: false, error: e.message }; }
+    if (!r.ok) {
+      if (view === sid) { box.value = box.value.replace(ref, "").replace(/  +/g, " "); autoGrow(); saveDraft(); }
+      hint(`📎 upload failed: ${r.error || "?"}`);
+      continue;
+    }
+    const noRead = s.tools && !/(^|,)\s*Read\b/.test(s.tools);
+    hint(`📎 saved ${rel} (${fmtSize(f.size)})` + (noRead ? " — ⚠ this plane's tools don't include Read, so claude can't view it" : ""));
+  }
+}
+box.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.items || [])].filter(it => it.kind === "file").map(it => it.getAsFile()).filter(Boolean);
+  if (!files.length) return;           // plain text paste: browser default
+  e.preventDefault();
+  uploadFiles(files);
+});
+composer.addEventListener("dragover", (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
+  e.preventDefault(); composer.classList.add("dropping");
+});
+composer.addEventListener("dragleave", (e) => { if (!composer.contains(e.relatedTarget)) composer.classList.remove("dropping"); });
+composer.addEventListener("drop", (e) => {
+  composer.classList.remove("dropping");
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  uploadFiles(files);
+});
+$("attach").addEventListener("click", () => { if (view) $("attachfile").click(); });
+$("attachfile").addEventListener("change", (e) => { const fl = [...e.target.files]; e.target.value = ""; uploadFiles(fl); });
+
 let mode = null, deadline = 0, dmTimer = null;
 function dmStart(label){
   deadline = Date.now() + DEADMAN_SECS * 1000;
@@ -1850,12 +2240,18 @@ $("termbtn").addEventListener("click", () => {
 });
 
 // ---------- layout: 1-col vs 3-col (explorer | file | claude) ----------
+// Per plane, remembered in localStorage (airportPlace_v1 .lay[id]); a plane you've
+// never toggled falls back to the old global choice (airportLayout_v1), then aspect.
 const LS_LAYOUT = "airportLayout_v1";
-let layoutOverride = localStorage.getItem(LS_LAYOUT) || null; // "wide" | "narrow" | null = auto by aspect
-function wideMode(){ return (layoutOverride || (innerWidth > innerHeight ? "wide" : "narrow")) === "wide"; }
+let layoutOverride = localStorage.getItem(LS_LAYOUT) || null; // legacy global: "wide" | "narrow" | null
+function wideMode(){
+  const mine = view ? (place().lay || {})[view] : null;
+  return (mine || layoutOverride || (innerWidth > innerHeight ? "wide" : "narrow")) === "wide";
+}
 $("laybtn").addEventListener("click", () => {
-  layoutOverride = wideMode() ? "narrow" : "wide";
-  localStorage.setItem(LS_LAYOUT, layoutOverride);
+  const next = wideMode() ? "narrow" : "wide";
+  if (view) placePut((p) => { (p.lay = p.lay || {})[view] = next; });
+  else { layoutOverride = next; localStorage.setItem(LS_LAYOUT, next); }
   render();
 });
 
@@ -1889,7 +2285,22 @@ foldBtn.addEventListener("click", () => {
 const exp = {};          // session id -> { cache:{rel:[entries]}, open:Set, sel, selData, fvfmt, editing }
 const lastRunSeen = {};  // session id -> lastRunEndedAt already reflected in the explorer
 let colsFor = null;      // which plane the explorer/file columns currently render
-function expState(){ return exp[view] || (exp[view] = { cache: {}, open: new Set(), sel: null, selData: null, fvfmt: null, editing: false }); }
+function expState(){
+  if (exp[view]) return exp[view];
+  const p = place();
+  return (exp[view] = { cache: {}, open: new Set((p.dirs || {})[view] || []), sel: null, selData: null, fvfmt: null, editing: false,
+    gitMode: !!(p.git || {})[view] });
+}
+// per-plane explorer config → localStorage: ⎇ git view on/off + which folders are expanded
+function saveExpCfg(){
+  if (!view || !exp[view]) return;
+  const st = exp[view];
+  placePut((p) => {
+    p.git = p.git || {}; p.dirs = p.dirs || {};
+    if (st.gitMode) p.git[view] = true; else delete p.git[view];
+    if (st.open.size) p.dirs[view] = [...st.open].slice(0, 200); else delete p.dirs[view];
+  });
+}
 function fmtSize(n){ if (n == null) return ""; if (n >= 1e6) return (n/1e6).toFixed(1)+"M"; if (n >= 1e3) return Math.round(n/1e3)+"k"; return n+"b"; }
 function fsRaw(op, rel, extra){
   return new Promise((resolve) => {
@@ -1935,6 +2346,7 @@ function renderExplorer(){
   ex.querySelectorAll("[data-dir]").forEach(el => el.addEventListener("click", () => {
     const rel = el.dataset.dir;
     st.open.has(rel) ? st.open.delete(rel) : st.open.add(rel);
+    saveExpCfg();
     renderExplorer();
   }));
   ex.querySelectorAll("[data-file]").forEach(el => el.addEventListener("click", () => openFile(el.dataset.file)));
@@ -1943,7 +2355,7 @@ function renderExplorer(){
   const nb = ex.querySelector("#expnew");
   if (nb) nb.addEventListener("click", newFile);
   const gb = ex.querySelector("#expgit");
-  if (gb) gb.addEventListener("click", () => { st.gitMode = true; loadGit(); });
+  if (gb) gb.addEventListener("click", () => { st.gitMode = true; saveExpCfg(); loadGit(); });
 }
 
 // ---------- git panel (⎇): changed files + commit graph ----------
@@ -2000,7 +2412,7 @@ function renderGitPanel(){
   }
   ex.innerHTML = html;
   const fb = ex.querySelector("#gfiles");
-  if (fb) fb.addEventListener("click", () => { st.gitMode = false; st.dview = null; destroyDiff(); renderExplorer(); renderFileView(); });
+  if (fb) fb.addEventListener("click", () => { st.gitMode = false; saveExpCfg(); st.dview = null; destroyDiff(); renderExplorer(); renderFileView(); });
   const rb = ex.querySelector("#gref");
   if (rb) rb.addEventListener("click", loadGit);
   ex.querySelectorAll("[data-gf]").forEach((el) => el.addEventListener("click", () => openGitDiff(el.dataset.gf)));
@@ -2085,6 +2497,7 @@ async function newFile(){
   st.cache = {};
   const parts = rel.split("/"); parts.pop();          // open the folders on the way down
   let p = ""; for (const seg of parts) { p = p ? p + "/" + seg : seg; st.open.add(p); }
+  saveExpCfg();
   renderExplorer();
   openFile(rel, true);
 }

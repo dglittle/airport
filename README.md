@@ -8,8 +8,8 @@ A system for managing Claude sessions, built on one idea:
 > hit ⚡, which executes **one turn** of `claude -p` on the session's machine.
 
 Lineage: this is the merger of two earlier projects — **corral**
-(`~/ergeon/corral`: the single-machine original, sessions as a shelf-synced CRUD
-collection) and **marina** (`~/pima/projects/marina`: the multi-machine hub with
+(the single-machine original, sessions as a shelf-synced CRUD
+collection) and **marina** (the multi-machine hub with
 sailing, auth, and two-account failover). Airport takes the best of both.
 
 ## The shape
@@ -18,7 +18,7 @@ sailing, auth, and two-account failover). Airport takes the best of both.
                     ┌── the UI (airport.html — served BY the tower, or open the file anywhere)
    phone/laptop ───▶│      browser speaks WS to the tower
                     ▼
-   ┌────────────── TOWER (server.js — the always-on machine, e.g. Lightsail) ─────────────┐
+   ┌────────────── TOWER (server.js — the always-on machine, e.g. a cloud VM) ─────────────┐
    │  • the shelf doc OWNS every session: params + full message mirror                     │
    │  • single merge point: writers send unversioned patches, tower fans versioned deltas  │
    │  • routes ⚡ run / interrupt / fs to the session's ground crew                         │
@@ -28,7 +28,7 @@ sailing, auth, and two-account failover). Airport takes the best of both.
    ┌───────┴────────┐        ┌────────┴───────┐              ┌────────┴───────┐
    │ GROUND CREW    │        │ GROUND CREW    │              │ GROUND CREW    │
    │ (daemon.js)    │        │ (daemon.js)    │              │ (daemon.js)    │
-   │ mac laptop     │        │ the Lightsail  │              │ any other      │
+   │ mac laptop     │        │ the cloud VM   │              │ any other      │
    │                │        │ box itself     │              │ machine…       │
    └────────────────┘        └────────────────┘              └────────────────┘
 ```
@@ -53,7 +53,9 @@ sizes, just bigger on the big screen. Your spatial memory transfers exactly.
 
 Drag to park, tap to board. Badges: amber pulse = flying (turn running), green
 ring = cache-hot (ran within the 1h prompt-cache TTL), purple dot = landed
-since you last looked, dimmed = its machine is offline.
+since you last looked, dimmed = its machine is offline. Drag on empty tarmac
+to rubber-band select several planes; dragging any selected plane moves the
+whole group.
 
 Not every tile is a claude session: **📝 notes** (＋ → "📝 note") are plain
 text files living in the shelf doc itself — no machine, no model, no
@@ -133,7 +135,45 @@ lists and scratch pads that should live where the work lives.
   rules, rendering, file delivery — templated with that plane's live setup
   (cwd, machine, model, context toggles). Like a skill, but it works even when
   the session runs with skills/CLAUDE.md off, and there's nothing to copy into
-  each cwd. It's a pending box: stack your actual ask on top, then ⚡.
+  each cwd. It's a pending box: stack your actual ask on top, then ⚡. With
+  `AIRPORT_OWNER` set on the tower, it names you ("Greta may edit past
+  boxes…"); unset, it says "the user".
+- **📎 attach / paste / drop** a file or image into the composer: it's saved
+  into the session's cwd and referenced in your message.
+- **Per-turn cost.** Every landed turn pins its stats on its last ai box:
+  time, cost, output tokens, cache read/write. The cost is computed from the
+  turn's own `usage` × the model's price (the CLI's `total_cost_usd` is
+  cumulative over a resumed transcript, so it isn't per-turn).
+- **🖼 plane icons.** `POST /icon {pass, session, png: base64}` (any PNG ≤ 1 MB)
+  gives a plane a picture on the tarmac in place of its emoji.
+
+## Planes that fly themselves
+
+- **⏭ queue.** Typing while a plane is flying queues the message; it goes out
+  as the next turn when the current one lands cleanly. A failed or ◼-stopped
+  turn holds the queue until you ⚡. If the airfield is at its turn cap or
+  offline, the queue waits and flies when a slot frees.
+- **⛽ pump planes** (`pumpText` in the flight plan). ⛽ resends the same
+  message, first zapping the previous pump turn (✂ tail-trim when it can, so
+  the cache stays warm). The transcript is always *base + one pump*: it never
+  grows, never needs compacting, and the last pump's output stays on screen.
+  Good for "check the inbox", "summarize what changed" and similar.
+- **⏰ wake timer** (`wakeEvery` minutes, ≥ 5). The tower flies the plane on
+  a clock: a pump plane pumps; any other plane gets `wakeText` (default
+  "⏰ wake") as a new turn. A wake that can't fly (flying, airfield offline or
+  at its cap) just retries next minute; `wakeGate` (default 0.8) skips wakes
+  while every account's 5h use is at or above the gate. `POST /wake {pass, id}`
+  fires one now.
+- **tarmac.js** is a plain CLI over the tower (`ls`, `show`, `say`, `wake`,
+  `new`, `set`, `usage`), e.g. for a plane that oversees other planes.
+
+## The header
+
+- **Usage dials:** per account, one bar per subscription window (5h, 7d, …),
+  read from the rate-limit headers of a 1-token probe (polled gently; ↻ probes
+  now). The thin bar under each shows how much of the window has elapsed.
+- **Box meter:** the tower machine's RAM, swap, and every ✻ claude process
+  on it with its RSS (airport's turns and anything else), pushed every 10 s.
 
 ## Quickstart (single machine, no auth)
 
@@ -147,7 +187,7 @@ Open <http://localhost:7800>, hit ＋, pick the airfield, go.
 
 ## Multi-machine (the real thing)
 
-**Tower on the always-on box** (Lightsail):
+**Tower on the always-on box** (a cloud VM):
 
 ```bash
 # ~/.airport/.env on the box:
@@ -164,7 +204,7 @@ laptop):
 #   AIRPORT_SERVER=wss://your.box:7800
 #   AIRPORT_PASS=<same passphrase>
 #   AIRPORT_HOST_NAME=mac            # or box / mac2 / …
-#   AIRPORT_ROOTS=~/pima:~/src       # optional extra cwd whitelist
+#   AIRPORT_ROOTS=~/code:~/src       # optional extra cwd whitelist
 node daemon.js
 ```
 
@@ -202,6 +242,8 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | `AIRPORT_TURN_TIMEOUT_MS` | daemon | `0` *(no limit)* | optional per-turn kill switch; ◼ stop is the manual brake |
 | `AIRPORT_STATE_DIR` | both | `~/.airport` | `.env`, token state |
 | `OPENAI_API_KEY` | tower | *(unset)* | enables ☁︎ whisper transcription |
+| `AIRPORT_OWNER` | tower | *(unset)* | your name, for the 🧭 briefing ("the user" if unset) |
+| `AIRPORT_URL` | tarmac.js | `http://localhost:<port>` | the tower's URL (set it when the tower runs TLS on a real hostname) |
 
 ## Two-account failover (the subscription-keys feature)
 
@@ -219,6 +261,11 @@ once, and the winner sticks until it fails in turn. NOTE the limit-failure
 shape (live-verified in marina): exit code 0, `subtype:"success"`, but
 `is_error:true` with result text like "You've reached your … limit" — so
 detection keys on a failed turn plus a deliberately broad regex.
+
+A plane can also **pin** an account (`token: 1|2` in its flight plan); a
+pinned plane that hits a limit retries that one turn on the other account but
+stays pinned. Its tile shows which account it last flew on (`t1`/`t2`).
+Switching accounts means a cold cache.
 
 No tokens configured = the machine's ambient `claude` login. `ANTHROPIC_API_KEY`
 is always stripped from turn env — airport never bills cash by accident.
@@ -248,9 +295,11 @@ leaves localhost:
 WS to the tower: `{type:"auth", role:"browser"|"host", pass, host?, info?}` →
 `{type:"doc"}` then `{type:"delta"}` stream. Writers send
 `{type:"update", patch}` (unversioned; the tower is the single merge point).
-Browsers: `run` / `interrupt` / `addbox` / `fs`. Daemons: `addbox` /
-`run-done` / `fs-res`. HTTP: `POST /update`, `POST /run` (curl-able), `GET
-/doc`, `GET /health`, `POST /whisper`.
+Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term`.
+Daemons: `addbox` / `run-done` / `fs-res`. HTTP (curl-able, all POSTs take
+`pass`): `POST /update`, `POST /run {id, text?}`, `POST /pump {id}`,
+`POST /wake {id}`, `POST /icon`, `POST /whisper`; `GET /doc`, `GET /health`,
+`GET /icon/<id>.png`.
 
 The doc:
 
@@ -265,7 +314,12 @@ The doc:
     state, running, startedAt,  // ready | processing | offline
     claudeSessionId, sidHost, dirty,
     trim,                       // pending ✂ tail-trim: {text: first zapped turn's prompt}
-    seenAt, lastRunEndedAt, hotUntil, turns, lastCost, lastMs, totalTokens, lastError,
+    seenAt, lastRunEndedAt, hotUntil, turns, lastCost, lastMs, costTotal, totalTokens, lastError,
+    token, lastToken,           // pinned account (1|2, absent = sticky failover) · the one it last flew on
+    queueWait,                  // why a ⏭ queue is waiting / held
+    pumpText,                   // ⛽ pump message (absent = not a pump plane)
+    wakeEvery, wakeText, wakeGate, lastWakeAt, wakeWait,   // ⏰ timer
+    iconV,                      // 🖼 icon version (cache-buster)
     messages: { m000001: { role, text, ts, synced, stats, depth } },
 } } }
 ```
@@ -280,5 +334,15 @@ The doc:
   build doesn't register into monaco's AMD loader.
 - One daemon per machine name; a second connection with the same name
   supersedes the first.
+- **Tower restarts and network blips don't lose turns.** While the tower is
+  unreachable, a daemon queues its boxes and run-done messages in an outbox,
+  and on reconnect it reports which turns are still flying. The tower keeps a
+  silent daemon's running planes in limbo for 90 s before declaring those
+  turns lost. A *daemon* restart still kills its running turns (they're its
+  children).
 - No remirror endpoint yet (corral had one): if a registered session keeps
   talking outside airport, the mirror falls behind — re-register to catch up.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

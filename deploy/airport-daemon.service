@@ -8,8 +8,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=bitnami
-WorkingDirectory=/home/bitnami/airport
+User=YOU
+WorkingDirectory=/home/YOU/airport
 ExecStart=/usr/bin/env node daemon.js
 Restart=always
 RestartSec=5

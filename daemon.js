@@ -21,7 +21,7 @@
 //   AIRPORT_CLAUDE_BIN     default "claude"
 //   AIRPORT_DEFAULT_MODEL  default "claude-fable-5"
 //   AIRPORT_SESS_ROOT      where remapped session cwds live (default ~/airport-sessions)
-//   AIRPORT_ROOTS          extra cwd whitelist, colon-separated (e.g. ~/pima:~/src)
+//   AIRPORT_ROOTS          extra cwd whitelist, colon-separated (e.g. ~/code:~/src)
 //   AIRPORT_MAX_TURNS      concurrent turn cap (default 2)
 //
 // Auth to claude: up to two subscription oauth tokens in <state>/.env
@@ -78,6 +78,51 @@ function saveTokenIdx() { try { fs.writeFileSync(TOKEN_STATE, JSON.stringify({ i
 // the limit failure shape (live-verified): exit 0, subtype "success", but is_error
 // with result text like "You've reached your … limit" — so detection keys on a
 // FAILED turn plus this deliberately broad regex.
+// ---- per-turn cost ----
+// On --resume the CLI's result.total_cost_usd, modelUsage and duration_api_ms are
+// CUMULATIVE over the whole transcript (verified 2.1.302), and subtracting the last
+// total breaks after trims/rebuilds. result.usage IS per-invocation (summed over all
+// of the turn's API calls — matches the CLI's own delta to 7 decimals), so the turn
+// costs usage × price. Table = the CLI's model catalog (pricing_tiers, 2.1.302),
+// $/Mtok; same formula as the CLI (1h vs 5m writes from usage.cache_creation,
+// long_prompt tier, ×1.1 for inference_geo "us"). Unknown model → cost null.
+const PRICE_TIERS = {
+  tier_2_10:                  { input: 2,   output: 10,  w5: 2.5,   w1: 4,   read: 0.2 },
+  tier_2_10_cache_read_0_10:  { input: 2,   output: 10,  w5: 2.5,   w1: 4,   read: 0.1 },
+  tier_3_15:                  { input: 3,   output: 15,  w5: 3.75,  w1: 6,   read: 0.3 },
+  tier_5_25:                  { input: 5,   output: 25,  w5: 6.25,  w1: 10,  read: 0.5 },
+  tier_15_75:                 { input: 15,  output: 75,  w5: 18.75, w1: 30,  read: 1.5 },
+  tier_10_50:                 { input: 10,  output: 50,  w5: 12.5,  w1: 20,  read: 1 },
+  tier_10_50_cache_read_0_25: { input: 10,  output: 50,  w5: 12.5,  w1: 20,  read: 0.25 },
+  tier_4_20_cache_read_0_20:  { input: 4,   output: 20,  w5: 5,     w1: 8,   read: 0.2 },
+  haiku_35:                   { input: 0.8, output: 4,   w5: 1,     w1: 1.6, read: 0.08 },
+  haiku_45:                   { input: 1,   output: 5,   w5: 1.25,  w1: 2,   read: 0.1 },
+  haiku_55:                   { input: 0.1, output: 0.5, w5: 0.125, w1: 0.2, read: 0.01,
+    long: { above: 1e5, input: 0.5, output: 2.5, w5: 0.625, w1: 1, read: 0.05 } },
+};
+const MODEL_TIER = {
+  "claude-3-5-haiku": "haiku_35", "claude-haiku-4-5": "haiku_45", "claude-haiku-5-5": "haiku_55",
+  "claude-3-5-sonnet": "tier_3_15", "claude-3-7-sonnet": "tier_3_15", "claude-sonnet-4-0": "tier_3_15", "claude-sonnet-4": "tier_3_15",
+  "claude-sonnet-4-5": "tier_3_15", "claude-sonnet-4-6": "tier_3_15", "claude-sonnet-5": "tier_2_10", "claude-sonnet-5-5": "tier_2_10_cache_read_0_10",
+  "claude-opus-4-0": "tier_15_75", "claude-opus-4": "tier_15_75", "claude-opus-4-1": "tier_15_75", "claude-opus-4-5": "tier_5_25",
+  "claude-opus-4-6": "tier_5_25", "claude-opus-4-7": "tier_5_25", "claude-opus-4-8": "tier_5_25", "claude-opus-5": "tier_5_25",
+  "claude-opus-5-5": "tier_4_20_cache_read_0_20", "claude-fable-5": "tier_10_50", "claude-fable-5-1": "tier_10_50_cache_read_0_25",
+  "claude-mythos-5": "tier_10_50", "claude-mythos-5-1": "tier_10_50_cache_read_0_25",
+};
+function priceFor(model) {
+  const m = String(model || "").toLowerCase().replace(/\[.*\]$/, "").replace(/-\d{8}$/, ""); // drop [1m] / -YYYYMMDD
+  return PRICE_TIERS[MODEL_TIER[m]] || null;
+}
+function turnCost(model, u) {
+  const p0 = priceFor(model);
+  if (!p0 || !u) return null;
+  const cw = u.cache_creation_input_tokens || 0, cr = u.cache_read_input_tokens || 0, inp = u.input_tokens || 0;
+  const p = p0.long && inp + cr + cw > p0.long.above ? p0.long : p0;
+  const h = Math.min((u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens) || 0, cw);
+  const c = (inp * p.input + (u.output_tokens || 0) * p.output + cr * p.read + h * p.w1 + (cw - h) * p.w5) / 1e6;
+  return c * (u.inference_geo === "us" ? 1.1 : 1) + ((u.server_tool_use && u.server_tool_use.web_search_requests) || 0) * 0.01;
+}
+
 const LIMIT_RE = /limit|allowance|quota|exceed|credit|unauthorized|invalid.*(key|token)|revoked|401|403|429/i;
 
 let CLAUDE_VERSION = "2.1.207";
@@ -174,7 +219,7 @@ function addBox(id, role, text, extra) {
 }
 
 // a session's stored cwd is interpreted PER MACHINE: if it doesn't fit this
-// machine's whitelist (e.g. ~/pima flown to the box), it deterministically
+// machine's whitelist (e.g. ~/code from a laptop, flown to a server), it deterministically
 // remaps to <sess root>/<id> — the stored cwd stays untouched, so flying
 // home restores the original workshop.
 function effectiveCwd(id, cwdRaw) {
@@ -191,7 +236,7 @@ function effectiveCwd(id, cwdRaw) {
 
 function failRun(id, error) {
   addBox(id, "tool", "✗ " + error, { synced: true, err: true });
-  runDone(id, { failed: true, error });
+  runDone(id, { failed: true, error, unsent: true }); // bounced before the CLI ran: the prompt boxes stay pending
 }
 
 function run(cmd, attempt = 0) {
@@ -225,7 +270,7 @@ function run(cmd, attempt = 0) {
   if (!resumable || trimErr) {
     if ((cmd.history || []).length) {
       try { resumeSid = synthTranscript(cwd, model, cmd.history); synthed = true; }
-      catch (e) { runDone(id, { failed: true, error: "synthesis failed: " + e.message }); return; }
+      catch (e) { runDone(id, { failed: true, error: "synthesis failed: " + e.message, unsent: true }); return; }
     } else resumeSid = null;
   }
   // the tower drops its trim marker once the transcript no longer needs it —
@@ -255,7 +300,13 @@ function run(cmd, attempt = 0) {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY; // subscription runs only — never bill cash by accident
   if (cmd.meta.useMemory === false) env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
-  const tok = TOKENS[tokenIdx] || null;
+  // token: a plane may pin one (meta.token, 1-based, like its model); unpinned
+  // planes ride the airfield's sticky failover index. cmd.useTok = this turn's
+  // forced pick (the failover retry). Switching tokens = cold cache (per account).
+  const pin = Number(cmd.meta.token) || 0;
+  const tokUsed = cmd.useTok != null ? cmd.useTok
+    : (pin >= 1 && pin <= TOKENS.length ? pin - 1 : tokenIdx);
+  const tok = TOKENS[tokUsed] || null;
   if (tok) env.CLAUDE_CODE_OAUTH_TOKEN = tok;
 
   let child;
@@ -311,14 +362,17 @@ function run(cmd, attempt = 0) {
     // account failover: allowance/auth smell → flip token, retry once
     if (failed && attempt === 0 && TOKENS.length > 1 &&
         LIMIT_RE.test(String(finalResult?.result || "") + " " + stderr)) {
-      tokenIdx = (tokenIdx + 1) % TOKENS.length;
-      saveTokenIdx();
-      towerSend({ type: "update", patch: { hosts: { [HOST_NAME]: { activeToken: tokenIdx + 1 } } } });
-      log(`(${id}) allowance/auth failure — switching to token #${tokenIdx + 1}, retrying`);
-      addBox(id, "tool", "(account allowance hit — switching accounts and retrying)", { synced: true, sys: true });
+      const next = (tokUsed + 1) % TOKENS.length;
+      if (!pin) { // unpinned: the airfield's sticky default flips too
+        tokenIdx = next;
+        saveTokenIdx();
+        towerSend({ type: "update", patch: { hosts: { [HOST_NAME]: { activeToken: tokenIdx + 1 } } } });
+      }
+      log(`(${id}) allowance/auth failure on token #${tokUsed + 1} — retrying on #${next + 1}${pin ? " (this turn only; plane pins #" + pin + ")" : ""}`);
+      addBox(id, "tool", `(account allowance hit on t${tokUsed + 1} — retrying this turn on t${next + 1}${pin ? "; the plane stays pinned to t" + pin : ""})`, { synced: true, sys: true });
       // retry resumes the SAME sid — the failed turn added nothing worth keeping.
       // trim/synth already happened on attempt 0: don't redo, but keep reporting it
-      run({ ...cmd, trim: null, trimSpent: trimConsumed, priorSynthed: synthed || cmd.priorSynthed,
+      run({ ...cmd, useTok: next, trim: null, trimSpent: trimConsumed, priorSynthed: synthed || cmd.priorSynthed,
             meta: { ...cmd.meta, claudeSessionId: sid, sidHost: HOST_NAME, dirty: false } }, 1);
       return;
     }
@@ -329,11 +383,15 @@ function run(cmd, attempt = 0) {
       // normal runs keep sid; a SUCCESSFUL --fork-session run gets the CLI-minted new
       // id from the result (a failed fork keeps the parent sid so the retry re-branches)
       claudeSessionId: (forking && !failed && finalResult?.session_id) ? finalResult.session_id : sid,
-      sidHost: HOST_NAME, failed: !!failed,
+      sidHost: HOST_NAME, failed: !!failed, token: tok ? tokUsed + 1 : null,
       synthed: synthed || !!cmd.priorSynthed, trimConsumed,
       error: failed ? String(finalResult?.subtype || ("exit " + code)) : null,
       stats: {
-        ms: finalResult?.duration_api_ms || 0, cost: finalResult?.total_cost_usd || 0,
+        // per-invocation numbers only (duration_api_ms / total_cost_usd are cumulative on --resume)
+        ms: finalResult?.duration_ms || 0,
+        cost: turnCost(Object.keys(finalResult?.modelUsage || {}).length === 1 ? Object.keys(finalResult.modelUsage)[0] : model, u),
+        total: finalResult?.total_cost_usd || 0, // the CLI's running total for this transcript
+        model,
         out: u?.output_tokens || 0, in: u?.input_tokens || 0,
         cread: u?.cache_read_input_tokens || 0, cwrite: u?.cache_creation_input_tokens || 0,
         ctx: lastMsgUsage
@@ -341,12 +399,12 @@ function run(cmd, attempt = 0) {
           : (u ? (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.input_tokens || 0) : 0),
       },
     });
-    log(`turn done (${id}) failed=${!!failed} $${finalResult?.total_cost_usd || "?"}`);
+    { const tc = turnCost(model, u); log(`turn done (${id}) failed=${!!failed} turn $${tc == null ? "?" : tc.toFixed(4)} (transcript total $${finalResult?.total_cost_usd || "?"})`); }
   });
   child.on("error", (err) => {
     clearTimeout(killer);
     procs.delete(id);
-    runDone(id, { failed: true, error: "spawn failed: " + err.message, synthed, trimConsumed });
+    runDone(id, { failed: true, error: "spawn failed: " + err.message, synthed, trimConsumed, unsent: true });
   });
 }
 
@@ -491,8 +549,10 @@ function fsOp(cmd) {
       if (st && st.isDirectory()) throw new Error("is a directory");
       if (st && cmd.ifAbsent) throw new Error("already exists");
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, String(cmd.text ?? ""));
-      res.size = Buffer.byteLength(String(cmd.text ?? ""));
+      // b64 = binary upload (pasted/attached images, files); text = editor saves
+      const data = typeof cmd.b64 === "string" ? Buffer.from(cmd.b64, "base64") : String(cmd.text ?? "");
+      fs.writeFileSync(p, data);
+      res.size = typeof data === "string" ? Buffer.byteLength(data) : data.length;
     } else throw new Error("unknown op");
   } catch (e) { res.ok = false; res.error = e.message; }
   towerSend(res);
@@ -500,9 +560,33 @@ function fsOp(cmd) {
 
 // ---------- tower connection (dial out + watchdog) ----------
 let towerWs = null, pendingWs = null, connecting = false, lastAttempt = 0, reconnectTimer = null;
+// ---- outbox: a tower restart / network blip must not lose a turn's boxes or its run-done ----
+// While the socket is down, boxes/updates/run-done queue here (in order); on reconnect we
+// auth first — reporting which turns are still flying and which finished meanwhile — then
+// flush. fs/term replies aren't kept: the browser sockets that asked died with the tower.
+// Capped at OUTBOX_MAX bytes (a long outage drops streaming boxes, never a run-done).
+const OUTBOX = [];              // [{ s: json, type, session }]
+let outboxBytes = 0;
+const OUTBOX_MAX = 20_000_000;
+const KEEP = new Set(["addbox", "run-done", "update"]);
 function towerSend(obj) {
-  if (!towerWs || towerWs.readyState !== 1) return;
-  try { towerWs.send(JSON.stringify(obj)); } catch (_) {}
+  const s = JSON.stringify(obj);
+  if (towerWs && towerWs.readyState === 1 && !OUTBOX.length) {
+    try { towerWs.send(s); return; } catch (_) {}
+  }
+  if (!KEEP.has(obj.type)) return;
+  if (outboxBytes + s.length > OUTBOX_MAX && obj.type !== "run-done") return;
+  OUTBOX.push({ s, type: obj.type, session: obj.session || null });
+  outboxBytes += s.length;
+}
+function flushOutbox(ws) {
+  let n = 0;
+  while (OUTBOX.length && ws.readyState === 1) {
+    const it = OUTBOX[0];
+    try { ws.send(it.s); } catch (_) { break; }
+    OUTBOX.shift(); outboxBytes -= it.s.length; n++;
+  }
+  if (n) log(`outbox: flushed ${n} message(s) held while the tower was unreachable`);
 }
 function scheduleConnect(ms) { // single pending redial — parallel timers seed flap loops
   clearTimeout(reconnectTimer);
@@ -518,10 +602,18 @@ function connect() {
   pendingWs = ws;
   ws.addEventListener("open", () => {
     connecting = false; towerWs = ws;
-    towerSend({ type: "auth", role: "host", host: HOST_NAME, pass: PASS,
-      info: { platform: os.platform(), sessRoot: SESS_ROOT, roots: WHITELIST,
-              defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length,
-              maxTurns: MAX_CONCURRENT_TURNS, activeToken: TOKENS.length ? tokenIdx + 1 : 0 } });
+    // auth goes straight out (ahead of the outbox). flying = turns still running here;
+    // pendingDone = turns that ended while we were cut off (their run-done is in the outbox)
+    // — so the tower keeps the first flying and lets the second land normally.
+    try {
+      ws.send(JSON.stringify({ type: "auth", role: "host", host: HOST_NAME, pass: PASS,
+        info: { platform: os.platform(), sessRoot: SESS_ROOT, roots: WHITELIST,
+                defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length,
+                maxTurns: MAX_CONCURRENT_TURNS, activeToken: TOKENS.length ? tokenIdx + 1 : 0,
+                flying: [...procs.keys()],
+                pendingDone: OUTBOX.filter((x) => x.type === "run-done" && x.session).map((x) => x.session) } }));
+    } catch (_) {}
+    flushOutbox(ws);
     log("tower connected");
   });
   ws.addEventListener("message", (e) => {

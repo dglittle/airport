@@ -2,6 +2,7 @@
   "name": "airport",
   "version": "1.0.0",
   "description": "every claude session, one airfield — sessions as editable message histories + params, run on any machine",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "server": "node server.js",

@@ -1,6 +1,11 @@
 node_modules/
 airport-data.json
+icons/
 *.log
 .env
 .DS_Store
-REGISTER-greg.md
+*.local.md
+*.bak*
+*.new
+todo.txt
+.claude/
