@@ -57,27 +57,37 @@
   #tarmac{ flex:1 1 auto; position:relative; overflow:hidden; touch-action:none; display:none; }
   #tarmac.on{ display:block; }
   #apron{ position:absolute; border:calc(var(--S,300px)*0.006) dashed var(--rule); border-radius:calc(var(--S,300px)*0.035); }
-  /* self-contained tile: emoji + name + meta all INSIDE the ⅛-side square */
+  /* self-contained tile: picture (or emoji) + name INSIDE the ⅛-side square. The border is a
+     RING that means time/progress: it sweeps while flying (one lap = 10 min), drains over the hot
+     hour, fills with an ember's done/total, and goes dashed when offline. --ring is painted into the
+     transparent border (border-box) under the panel (padding-box); --f/--h/--e come from renderTarmac. */
   .plane{
     position:absolute; width:calc(var(--S)*0.125); height:calc(var(--S)*0.125);
-    transform:translate(-50%,-50%);
-    background:var(--panel); border:calc(var(--S)*0.005) solid var(--rule); border-radius:18%;
+    transform:translate(-50%,-50%); container-type:size;
+    --rw:max(2.5px,calc(var(--S)*0.006));
+    border:var(--rw) solid transparent; border-radius:18%;
+    background:linear-gradient(var(--panel),var(--panel)) padding-box, var(--ring,var(--rule)) border-box;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:calc(var(--S)*0.003); padding:calc(var(--S)*0.006);
     text-align:center; cursor:pointer;
     -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent;
     transition:border-color .2s, box-shadow .2s;
   }
-  .plane.note{ border-style:dashed; }
+  .plane.note{ --ring:repeating-conic-gradient(rgba(143,165,192,.7) 0 6deg,transparent 0 13deg); }
   /* 🔥 ember tiles: long-running work with a URL; the tower stamps s.em from the ember's /state */
-  .plane.ember{ border-color:rgba(224,122,44,.45); overflow:hidden; }
-  .plane.ember.live{ border-color:#e07a2c; box-shadow:0 0 calc(var(--S)*0.03) rgba(224,122,44,.35); }
-  .plane.ember.bad{ border-color:var(--bad); }
-  .plane .embar{ position:absolute; left:0; bottom:0; height:calc(var(--S)*0.006); background:linear-gradient(90deg,#e07a2c,#f2b84b); transition:width .4s; }
+  .plane.ember{ --ring:conic-gradient(#e07a2c calc(var(--e,0)*1turn),rgba(224,122,44,.22) 0); }
+  .plane.ember.live{ box-shadow:0 0 calc(var(--S)*0.03) rgba(224,122,44,.35); }
+  .plane.ember.done{ --ring:var(--hot); }
+  .plane.ember.bad{ --ring:var(--bad); }
   .emm.running{ color:#f2b84b; } .emm.paused{ color:var(--muted); } .emm.done{ color:var(--hot); } .emm.failed,.emm.stalled,.emm.err{ color:var(--bad); }
-  .plane.hot{ border-color:var(--hot); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
-  .plane.running{ border-color:var(--run); box-shadow:0 0 calc(var(--S)*0.035) rgba(255,196,107,.45); animation:pulse 1.1s infinite; }
-  .plane.offline{ opacity:.45; }
+  /* amber = working, not ready yet; green = landed, ready for you (same as embers: orange running, green done) */
+  .plane.hot{ --ring:conic-gradient(rgba(79,227,168,.22) calc((1 - var(--h,1))*1turn),var(--hot) 0); box-shadow:0 0 calc(var(--S)*0.03) rgba(79,227,168,.3); }
+  .plane.running{ --ring:conic-gradient(var(--run) calc(var(--f,0)*1turn),rgba(255,196,107,.24) 0);
+    box-shadow:0 0 calc(var(--S)*0.02) rgba(255,196,107,.35); animation:beacon 2.4s ease-in-out infinite; }
+  @keyframes beacon{ 50%{ box-shadow:0 0 calc(var(--S)*0.045) rgba(255,196,107,.7); } }
+  @media (prefers-reduced-motion:reduce){ .plane.running{ animation:none; } }
+  .plane.offline{ --ring:repeating-conic-gradient(rgba(143,165,192,.55) 0 5deg,transparent 0 15deg); }
+  .plane.offline > .emoji, .plane.offline > .cap{ filter:grayscale(.9) brightness(.62); }
   /* multi-select: drag on empty tarmac = rubber band; selected planes move as a group */
   .plane.sel{ outline:calc(var(--S)*0.004) solid var(--accent); outline-offset:calc(var(--S)*0.005); }
   #selbox{ position:absolute; display:none; border:1px dashed var(--accent); background:rgba(232,161,60,.08);
@@ -89,46 +99,35 @@
     width:calc(var(--S)*0.03); height:calc(var(--S)*0.03); border-radius:50%;
     background:var(--new); border:calc(var(--S)*0.005) solid var(--bg); box-shadow:0 0 calc(var(--S)*0.025) rgba(183,140,255,.7);
   }
-  .plane .emoji{ font-size:calc(var(--S)*0.038); line-height:1.15; position:relative; }
+  .plane .emoji{ font-size:calc(var(--S)*0.048); line-height:1.15; position:relative; }
   /* a plane image replaces the emoji glyph (the emoji stays as the fallback if it 404s) */
   .plane .emoji img.picon{ display:block; width:calc(var(--S)*0.052); height:calc(var(--S)*0.052); border-radius:22%;
     margin:calc(var(--S)*0.001) auto calc(var(--S)*0.002); pointer-events:none; }
   .plane .emoji img.picon + .eglyph{ display:none; }
-  /* a plane with a picture: the picture fills the whole tile, and the name + meta ride on a dark
-     band across the bottom. :has() = only while the <img> is there (onerror removes it → the
-     plain stacked layout comes back). Tiles without a picture keep the stacked layout. */
-  .plane .cap{ display:contents; }
+  /* the name sits UNDER the square, one line at ~tile width (the square is still what's positioned;
+     clampY leaves room for it at the bottom of the apron). A plane with a picture: the picture fills
+     the whole tile. :has() = only while the <img> is there (onerror removes it → emoji, centred). */
+  .plane .cap{ position:absolute; top:100%; left:50%; transform:translateX(-50%); width:112%;
+    margin-top:calc(var(--rw) + max(3px,calc(var(--S)*0.005))); text-align:center;
+    text-shadow:0 1px 2px #000,0 0 6px var(--bg); }
+  .plane.sel .cap{ margin-top:calc(var(--rw) + max(6px,calc(var(--S)*0.01))); }
   .plane .unread{ z-index:2; }
   .plane:has(> .emoji > img.picon){ padding:0; justify-content:flex-end; }
   .plane:has(> .emoji > img.picon) .emoji{ position:absolute; inset:0; }
   .plane:has(> .emoji > img.picon) .emoji img.picon{ width:100%; height:100%; margin:0; object-fit:cover;
     border-radius:calc(var(--S)*0.0175); }
-  .plane:has(> .emoji > img.picon) .cap{ display:block; position:relative; width:100%;
-    padding:calc(var(--S)*0.003) 7% calc(var(--S)*0.004);
-    background:rgba(0,0,0,.62); border-radius:0 0 calc(var(--S)*0.0175) calc(var(--S)*0.0175); }
-  .plane:has(> .emoji > img.picon) .meta{ color:#a9b8cc; }
+  /* ⏭n queued, bottom-right */
+  .plane .qn{ position:absolute; right:4%; bottom:4%; z-index:2; font:700 max(8px,11cqw)/1.1 ui-monospace,Menlo,monospace;
+    padding:.14em .36em; border-radius:999px; background:var(--panel2); color:var(--ink); border:1px solid var(--rule); }
   #hdr-icon{ display:none; width:22px; height:22px; border-radius:22%; flex:0 0 auto; }
   #hdr-icon.on{ display:block; }
   #pumpbtn{ display:none; flex:.8; border-color:#e8a13c; color:var(--accent); }
   #pumpbtn.on{ display:block; }
   .who .pm{ color:var(--accent); }
-  /* which account (token) the plane last flew on — in the meta line after the host,
-     in the token's colour (upright = pinned, italic+fainter = auto, amber = pinned but failed over) */
-  .plane .meta .tkc{ font-weight:600; opacity:.85; }
-  .plane .meta .tkc.auto{ font-style:italic; opacity:.65; }
-  .plane .meta .tkc.over{ color:var(--run); }
   .plane .name{
-    font-size:calc(var(--S)*0.0165); font-weight:600; color:var(--ink); line-height:1.2;
+    font-size:max(10px,calc(var(--S)*0.0165)); font-weight:600; color:var(--ink); line-height:1.2;
     max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .plane .meta{
-    font-size:calc(var(--S)*0.0115); color:var(--dim); font-family:ui-monospace,Menlo,monospace; line-height:1.2;
-    max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  .plane .meta .hostm{ color:var(--muted); }
-  .plane .meta .hostm.off{ color:var(--bad); }
-  .plane .meta .hotm{ color:var(--hot); }
-  .plane .meta .runm{ color:var(--run); }
   #addplane{
     position:absolute; right:calc(var(--S)*0.02); bottom:calc(var(--S)*0.02);
     width:calc(var(--S)*0.09); height:calc(var(--S)*0.09);
@@ -490,7 +489,6 @@
   #stopbtn{ display:none; flex:.4; background:linear-gradient(180deg,#4a1a14 0%,#2a0e0a 100%); border-color:var(--bad); color:#ff9c8a; }
   #stopbtn.on{ display:block; }
   .who .qd{ color:var(--new); }
-  .plane .meta .qm{ color:var(--new); }
   .hintline{ color:var(--dim); font-size:10px; text-align:center; margin-top:6px; font-family:ui-monospace,Menlo,monospace; min-height:12px; }
   /* phones, cramped on purpose: row 1 = ‹ title · status · buttons; row 2 = the sub line
      (≤3 tiny lines) on the left, the dashboard (mem/swap stacked like the dials) on the right */
@@ -1043,43 +1041,48 @@ function renderTarmac(){
     el.classList.toggle("ember", isEmber);
     el.classList.toggle("live", isEmber && ["running", "starting", "stopping"].includes(emSt));
     el.classList.toggle("bad", isEmber && ["failed", "stalled", "unreachable"].includes(emSt));
+    el.classList.toggle("done", isEmber && emSt === "done");
     el.classList.toggle("running", !isTile && !!s.running);
     el.classList.toggle("hot", !isTile && !s.running && isHot(s));
-    el.classList.toggle("offline", !isTile && s.state === "offline");
+    el.classList.toggle("offline", !isTile && (s.state === "offline" || !hostUp(s.host)));
     el.classList.toggle("sel", selected.has(id));
-    el.title = isEmber ? tileTitle(id, s) + " — ember · " + emSt + (em.msg ? " · " + em.msg : "") : s.title || id;
+    // the ring: --f = flight time (one lap = 10 min), --h = what's left of the hot hour, --e = ember done/total
+    const now = Date.now();
+    el.style.setProperty("--f", s.running ? ((now - (s.startedAt || now)) % 600000) / 600000 : 0);
+    el.style.setProperty("--h", isHot(s) ? Math.max(0, Math.min(1, (s.hotUntil - now) / Math.max(1, s.hotUntil - s.lastRunEndedAt))) : 1);
+    el.style.setProperty("--e", isEmber ? (em.total ? Math.min(1, (em.done || 0) / em.total) : 1) : 0);
     if (!(dragState && dragState.group.has(id))) {
       const x = clampX(typeof s.x === "number" ? s.x : 0.5);
       const y = clampY(typeof s.y === "number" ? s.y : 0.5);
       el.style.left = (x * S) + "px";   // tile center (translate(-50%,-50%))
       el.style.top = (y * S) + "px";
       const off = !hostUp(s.host);
-      const meta = s.running
-        ? `<span class="runm">✈${fmtFly(Date.now() - (s.startedAt || Date.now()))}</span>`
-        : isHot(s) ? `<span class="hotm">${ago(s.lastRunEndedAt)}</span>` // green tint + ring = hot; no word needed
-        : (s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new");
+      const meta = s.running ? "✈ " + fmtFly(Date.now() - (s.startedAt || Date.now()))
+        : s.lastRunEndedAt ? ago(s.lastRunEndedAt) : "new";
       const qn = isNote ? 0 : Object.values(s.messages || {}).filter((b) => b && b.queued && !b.synced).length;
-      // token tag after the host: the account it last flew on
+      // the tile shows only the picture/emoji + name — the ring carries time/progress, and the
+      // details (host, token, tokens, age) live in the tooltip
       const tk = isNote ? 0 : Number(s.lastToken) || Number(s.token) || 0, pin = Number(s.token) || 0;
-      const tokTag = tk ? `<span class="tkc tk${tk}${pin ? "" : " auto"}${pin && pin !== tk ? " over" : ""}" title="${
-        pin ? (pin !== tk ? `pinned to t${pin}, but the last turn failed over to t${tk}` : `pinned to t${pin}`) : `auto — last flew on t${tk}`}">t${tk}</span>` : "";
-      const metaLine = isEmber
-        ? `<span class="emm ${esc(emSt)}">${esc(emSt)}</span>${em.total ? "·" + (em.done || 0) + "/" + em.total : em.done ? "·" + em.done : ""}${em.ended ? "·" + ago(em.ended) : ""}`
-        : isNote
-        ? `<span class="hostm">note</span>·${s.editedAt ? ago(s.editedAt) : "new"}`
-        : `<span class="hostm${off ? " off" : ""}">${esc(s.host || "?")}</span>${tokTag ? "·" + tokTag : ""}·${s.running ? "" : fmtTok(s.totalTokens) + "·"}${meta}${qn ? `·<span class="qm" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</span>` : ""}`;
+      const tokTxt = tk ? `t${tk}${pin ? (pin !== tk ? ` (pinned t${pin}, failed over)` : " (pinned)") : " (auto)"}` : "";
+      const name = isEmber ? tileTitle(id, s) : s.title || id;
+      el.title = name + " — " + (isEmber
+        ? ["ember", emSt, em.total ? (em.done || 0) + "/" + em.total : em.done || "", em.ended ? ago(em.ended) : "", em.msg || ""]
+        : isNote ? ["note", s.editedAt ? ago(s.editedAt) : "new"]
+        : [s.host || "?", off ? "host down" : s.state === "offline" ? "offline" : "", tokTxt, s.running ? "" : fmtTok(s.totalTokens), meta, !s.running && isHot(s) ? "hot" : "",
+           qn ? `⏭${qn} queued` : "", isUnread(s) ? "unread" : ""]).filter(Boolean).join(" · ");
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
         <div class="emoji">${isTile ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>
-        <div class="cap"><div class="name">${esc(isEmber ? tileTitle(id, s) : s.title || id)}</div>
-        <div class="meta">${metaLine}</div></div>${isEmber && em.total ? `<div class="embar" style="width:${Math.min(100, Math.round(100 * (em.done || 0) / em.total))}%"></div>` : ""}`;
+        <div class="cap"><div class="name">${esc(name)}</div></div>${qn ? `<div class="qn" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
 }
 function clampX(x){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, x)); }
-function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, y)); }
+function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015 - NAME_H(), y)); }
+// the name line under each tile, as a fraction of the apron (≥10px text on small aprons)
+function NAME_H(){ return APRON_S ? Math.max(0.03, 17 / APRON_S) : 0.03; }
 function planeEl(id){ return $("apron").querySelector(`.plane[data-id="${CSS.escape(id)}"]`); }
 function wirePlane(el){
   el.addEventListener("pointerdown", (e) => {
@@ -1100,10 +1103,10 @@ function wirePlane(el){
     if (!dragState.moved && Math.hypot(dx, dy) < 8) return;
     dragState.moved = true;
     // clamp the group as a block: the move stops when ANY member hits an edge
-    const S = APRON_S, lo = (DISC/2 + 0.015) * S, hi = (1 - DISC/2 - 0.015) * S;
+    const S = APRON_S, lo = (DISC/2 + 0.015) * S, hi = (1 - DISC/2 - 0.015) * S, hiY = hi - NAME_H() * S;
     for (const g of dragState.group.values()) {
       dx = Math.max(lo - g.ox, Math.min(hi - g.ox, dx));
-      dy = Math.max(lo - g.oy, Math.min(hi - g.oy, dy));
+      dy = Math.max(lo - g.oy, Math.min(hiY - g.oy, dy));
     }
     for (const g of dragState.group.values()) {
       g.el.classList.add("dragging");
