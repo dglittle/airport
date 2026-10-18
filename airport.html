@@ -94,6 +94,19 @@
   .plane .emoji img.picon{ display:block; width:calc(var(--S)*0.052); height:calc(var(--S)*0.052); border-radius:22%;
     margin:calc(var(--S)*0.001) auto calc(var(--S)*0.002); pointer-events:none; }
   .plane .emoji img.picon + .eglyph{ display:none; }
+  /* a plane with a picture: the picture fills the whole tile, and the name + meta ride on a dark
+     band across the bottom. :has() = only while the <img> is there (onerror removes it → the
+     plain stacked layout comes back). Tiles without a picture keep the stacked layout. */
+  .plane .cap{ display:contents; }
+  .plane .unread{ z-index:2; }
+  .plane:has(> .emoji > img.picon){ padding:0; justify-content:flex-end; }
+  .plane:has(> .emoji > img.picon) .emoji{ position:absolute; inset:0; }
+  .plane:has(> .emoji > img.picon) .emoji img.picon{ width:100%; height:100%; margin:0; object-fit:cover;
+    border-radius:calc(var(--S)*0.0175); }
+  .plane:has(> .emoji > img.picon) .cap{ display:block; position:relative; width:100%;
+    padding:calc(var(--S)*0.003) 7% calc(var(--S)*0.004);
+    background:rgba(0,0,0,.62); border-radius:0 0 calc(var(--S)*0.0175) calc(var(--S)*0.0175); }
+  .plane:has(> .emoji > img.picon) .meta{ color:#a9b8cc; }
   #hdr-icon{ display:none; width:22px; height:22px; border-radius:22%; flex:0 0 auto; }
   #hdr-icon.on{ display:block; }
   #pumpbtn{ display:none; flex:.8; border-color:#e8a13c; color:var(--accent); }
@@ -1058,8 +1071,8 @@ function renderTarmac(){
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
         <div class="emoji">${isTile ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>
-        <div class="name">${esc(isEmber ? tileTitle(id, s) : s.title || id)}</div>
-        <div class="meta">${metaLine}</div>${isEmber && em.total ? `<div class="embar" style="width:${Math.min(100, Math.round(100 * (em.done || 0) / em.total))}%"></div>` : ""}`;
+        <div class="cap"><div class="name">${esc(isEmber ? tileTitle(id, s) : s.title || id)}</div>
+        <div class="meta">${metaLine}</div></div>${isEmber && em.total ? `<div class="embar" style="width:${Math.min(100, Math.round(100 * (em.done || 0) / em.total))}%"></div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
     }
   }
