@@ -143,6 +143,11 @@
   .plane > .eframe iframe{ position:absolute; left:0; top:0; width:260px; height:260px; border:0; transform-origin:0 0;
     transform:scale(var(--fk,.3)); pointer-events:none; }
   .plane:has(> .eframe){ padding:0; }
+  /* bare glass: a framed ember's page speaks for itself, so airport draws no ring, panel or glow around it (no-frame
+     embers keep the ring). The selection outline, unread dot and drag shadow stay, same as planes. */
+  .plane.ember:has(> .eframe){ border-width:0; background:none; }
+  .plane.ember:not(.dragging):has(> .eframe){ box-shadow:none; }
+  .plane.ember > .eframe{ border-radius:18%; }
   .plane .qn{ position:absolute; right:4%; bottom:4%; z-index:2; font:700 max(8px,11cqw)/1.1 ui-monospace,Menlo,monospace;
     padding:.14em .36em; border-radius:999px; background:var(--panel2); color:var(--ink); border:1px solid var(--rule); }
   #hdr-icon{ display:none; width:22px; height:22px; border-radius:22%; flex:0 0 auto; }
