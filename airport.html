@@ -47,6 +47,8 @@
   header .stat{ font-size:10px; color:var(--muted); font-family:ui-monospace,Menlo,monospace; display:flex; align-items:center; gap:5px; flex:0 0 auto; }
   /* the dashboard (box meter + usage dials): inline on wide screens; its own
      right-aligned second header row on phones, so the title keeps its room */
+  #pv{ font:8px ui-monospace,Menlo,monospace; color:var(--dim); margin-left:4px; letter-spacing:.02em; }
+  #pv:empty{ display:none; }
   #dash{ margin-left:auto; flex:0 0 auto; display:flex; gap:.8em; align-items:center; }
   #dash:has(#mem:empty):has(#gauge:empty){ display:none; }
   .hbreak{ display:none; }
@@ -560,7 +562,7 @@
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
     <span class="hbreak"></span>
     <span id="dash"><span id="mem"></span><span id="gauge"></span></span>
-    <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span></span>
+    <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span><span id="pv" title="page version: the tower stamps this when it serves the page; compare with what a plane says is live"></span></span>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="filesbtn" style="display:none" title="this plane's files">📁</button>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
@@ -717,6 +719,7 @@ const $ = (id) => document.getElementById(id);
 const tarmacEl = $("tarmac"), feedEl = $("feed"), composer = $("composer"), colsEl = $("cols");
 
 function esc(x){ const d = document.createElement("div"); d.textContent = x == null ? "" : String(x); return d.innerHTML; }
+$("pv").textContent = /^[0-9a-f]{4,}$/.test(PAGE_VER) ? "v" + PAGE_VER.slice(0, 4) : "";   // which page this phone is really running
 function setStat(k, m){ $("stat").className = "stat " + k; $("stat-txt").textContent = m; }
 function sessions(){ return (doc[0] && doc[0].sessions) || {}; }
 function hosts(){ return (doc[0] && doc[0].hosts) || {}; }
