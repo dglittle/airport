@@ -184,6 +184,11 @@ stream and a stop button. The contract is at
   `done/total` and a progress bar. A running ember whose heartbeat is over 90 s
   old shows as **stalled**. One the tower can't reach shows as **unreachable**,
   and the tower retries with backoff.
+- **A live tile** (`frame: true`, e.g. `tarmac.js set <tile> frame=true`): instead of
+  its picture, the tile shows the ember's own page in a small iframe. The iframe is laid out at a fixed
+  260×260 CSS px and scaled to the tile, and it ignores the pointer, so the tile still drags and opens.
+  An ember can tell it's on the tarmac (framed, and its viewport ≤ ~420 px) and draw a compact
+  dashboard for that size. Each live tile holds its own `/state` stream open.
 - **Opening the tile** shows the ember's own dashboard in an iframe, under a
   native bar: ⏸ ▶ ■ (whatever its `controls` allow), ↗ to open it in its own
   tab, the plane its messages go to, and ✕ to remove the tile (the ember keeps
@@ -341,6 +346,7 @@ The doc:
     kind,                       // absent = claude session; "note" = a 📝 text file (only title/emoji/x/y/text/editedAt apply);
                                 //   "ember" = a 🔥 ember tile (title/emoji/x/y/url/owner/em/emTold)
     url, owner, emTold,         // 🔥 ember: its base URL (#k=key) · the plane its tells go to · newest tell handled
+    frame,                      // 🔥 ember: true = the tile shows a live iframe of the ember's page instead of its picture
     em,                         // 🔥 ember summary, stamped by the tower: {status, title, emoji, done, total, msg,
                                 //   started, ended, error, usd, budget, controls:"stop,pause,…", stalled, conn}
     text, editedAt,             // 📝 note content + last-edit stamp

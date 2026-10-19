@@ -117,6 +117,13 @@
   .plane:has(> .emoji > img.picon) .emoji img.picon{ width:100%; height:100%; margin:0; object-fit:cover;
     border-radius:calc(var(--S)*0.0175); }
   /* ⏭n queued, bottom-right */
+  /* 🔥 live ember tile (s.frame): the ember's own page in a small iframe instead of the picture. The iframe is laid out at
+     a fixed 260×260, so an ember can tell it's on the tarmac and switch to a compact dashboard, and it is scaled down to
+     the tile (--fk, set by renderTarmac). pointer-events:none, so the tile still drags, selects and opens as usual. */
+  .plane > .eframe{ position:absolute; inset:0; overflow:hidden; border-radius:calc(var(--S)*0.0175); background:#04070c; }
+  .plane > .eframe iframe{ position:absolute; left:0; top:0; width:260px; height:260px; border:0; transform-origin:0 0;
+    transform:scale(var(--fk,.3)); pointer-events:none; }
+  .plane:has(> .eframe){ padding:0; }
   .plane .qn{ position:absolute; right:4%; bottom:4%; z-index:2; font:700 max(8px,11cqw)/1.1 ui-monospace,Menlo,monospace;
     padding:.14em .36em; border-radius:999px; background:var(--panel2); color:var(--ink); border:1px solid var(--rule); }
   #hdr-icon{ display:none; width:22px; height:22px; border-radius:22%; flex:0 0 auto; }
@@ -1072,9 +1079,11 @@ function renderTarmac(){
            qn ? `⏭${qn} queued` : "", isUnread(s) ? "unread" : ""]).filter(Boolean).join(" · ");
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
-        <div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>
+        ${isEmber && s.frame && s.url ? `<div class="eframe"><iframe src="${esc(s.url)}" tabindex="-1" scrolling="no" referrerpolicy="no-referrer" title="${esc(name)}"></iframe></div>`
+        : `<div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>`}
         <div class="cap"><div class="name">${esc(name)}</div></div>${qn ? `<div class="qn" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
+      if (isEmber && s.frame) el.style.setProperty("--fk", (el.clientWidth || 260) / 260);   // live ember tile: scale its 260px iframe to the tile
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
