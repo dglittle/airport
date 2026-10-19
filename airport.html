@@ -33,6 +33,12 @@
   header b{ font-size:14px; line-height:1.2; flex:0 1 auto; min-width:0; white-space:normal; overflow-wrap:anywhere; }
   header .sub{ color:var(--dim); font-size:10px; line-height:1.25; font-family:ui-monospace,Menlo,monospace; flex:1 1 0; min-width:70px;
     white-space:normal; overflow-wrap:anywhere; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+  /* ‹ back: a bigger glyph (wider, not taller: the header row keeps its height), plus an invisible
+     tap zone over the header's whole left end, top edge to bottom edge. The icon, title and sub line
+     there aren't tappable anyway, so a thumb landing anywhere near the corner goes back. */
+  header{ position:relative; }
+  header #back{ font-size:20px; line-height:14px; font-weight:700; padding:2px 11px 3px; }
+  header #back::after{ content:""; position:absolute; left:0; top:0; bottom:0; width:64px; }
   header button{
     background:transparent; border:1px solid var(--rule); color:var(--muted);
     border-radius:7px; padding:3px 7px; font-size:13px; cursor:pointer; flex:0 0 auto;
