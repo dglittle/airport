@@ -2398,9 +2398,28 @@ $("termbtn").addEventListener("click", () => {
 // never toggled falls back to the old global choice (airportLayout_v1), then aspect.
 const LS_LAYOUT = "airportLayout_v1";
 let layoutOverride = localStorage.getItem(LS_LAYOUT) || null; // legacy global: "wide" | "narrow" | null
+// The automatic layout follows the window's shape (wider than tall = wide) — but NOT while you're
+// typing: a phone keyboard shrinks the window (390×780 → 390×350 reads as "landscape"), which flipped
+// the page into the explorer columns mid-sentence. While a text field has focus the last shape holds;
+// it's re-judged when focus leaves (a real rotation still applies once you stop typing).
+let autoWide = innerWidth > innerHeight;
+function typingNow(){
+  const a = document.activeElement;
+  if (!a) return false;
+  if (a.isContentEditable || a.tagName === "TEXTAREA") return true;
+  return a.tagName === "INPUT" && !/^(button|checkbox|radio|range|color|file|submit|reset|image)$/i.test(a.type || "");
+}
+function autoLayout(){
+  if (!typingNow()) autoWide = innerWidth > innerHeight;
+  return autoWide ? "wide" : "narrow";
+}
+document.addEventListener("focusout", () => setTimeout(() => {
+  if (typingNow() || autoWide === (innerWidth > innerHeight)) return;
+  if (view) render(); else if (doc[0]) renderTarmac();
+}, 400));
 function wideMode(){
   const mine = view ? (place().lay || {})[view] : null;
-  return (mine || layoutOverride || (innerWidth > innerHeight ? "wide" : "narrow")) === "wide";
+  return (mine || layoutOverride || autoLayout()) === "wide";
 }
 $("laybtn").addEventListener("click", () => {
   const next = wideMode() ? "narrow" : "wide";
