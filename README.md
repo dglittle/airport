@@ -109,6 +109,14 @@ lists and scratch pads that should live where the work lives.
 - **File columns.** In landscape, each session gets explorer + file viewer
   columns rooted at its cwd (relayed tower→daemon), with a monaco editor and
   unsaved-edit drafts. Small images preview inline (base64 through the relay).
+- **Files on a phone.** A phone (coarse pointer, short screen side < 500px)
+  never gets the three columns. Instead the header's 📁 pushes the explorer as
+  a whole page, a file pushes the viewer, and ‹ or the system back gesture
+  pops (each step is a history entry). In landscape an open file sits beside
+  the chat. Narrow windows on a desktop get the same pages.
+- **✈ landed.** After each turn, a card lists the files its ▸ Write/Edit tool
+  calls touched under the cwd (＋ wrote, ± edited); tap one to open it. Files
+  made through Bash don't show up there.
 - **⎇ git view.** The explorer header's ⎇ flips the file column to git: the
   changed files (click one = monaco diff of HEAD vs working tree in the file
   view), then every commit with a VS-Code-style graph gutter (click one = its

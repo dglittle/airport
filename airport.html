@@ -227,6 +227,17 @@
     -webkit-user-select:none; user-select:none;
   }
   #cols.wide #fileview{ display:flex; flex-direction:column; flex:1.15 1 0; min-width:0; border-right:1px solid var(--rule); }
+  /* narrow / phone: the explorer and the file view are whole pages (📁 → tree → file; ‹ or the system back gesture pops) */
+  #cols.pg-tree #explorer{ display:block; flex:1 1 0; min-width:0; overflow-y:auto; padding:8px 6px; font:13px ui-monospace,Menlo,monospace; -webkit-user-select:none; user-select:none; }
+  #cols.pg-file #fileview{ display:flex; flex-direction:column; flex:1 1 0; min-width:0; }
+  #cols.pg-tree #claudecol, #cols.pg-file:not(.pg-split) #claudecol{ display:none; }
+  #cols.pg-split #fileview{ flex:1.25 1 0; border-right:1px solid var(--rule); }
+  .exphead .phback, .fvhead .phback{ margin-left:0; flex:0 0 auto; color:var(--ink); font-size:15px; line-height:1; padding:2px 9px; }
+  @media (pointer:coarse){
+    #cols.pg-tree .fent, #cols.pg-tree .gitf{ min-height:40px; }
+    #cols.pg-tree .gitc{ min-height:32px; align-items:center; }
+    #cols.pg-tree .exphead button, #cols.pg-file .fvhead button{ min-height:30px; min-width:34px; font-size:13px; }
+  }
   .exphead{ display:flex; align-items:center; gap:6px; padding:2px 6px 8px; color:var(--dim); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
   .exphead button{ margin-left:auto; background:transparent; border:1px solid var(--rule); color:var(--muted); border-radius:6px; padding:1px 7px; font-size:11px; cursor:pointer; }
   .fent{ display:flex; align-items:center; gap:5px; padding:3px 6px; border-radius:6px; cursor:pointer; white-space:nowrap; color:var(--muted); }
@@ -460,6 +471,16 @@
   .text.md th,.text.md td{ border:1px solid var(--rule); padding:4px 9px; text-align:left; }
   .text.md th{ background:var(--panel2); }
   .htmlframe{ width:100%; height:min(430px,55vh); border:1px solid var(--rule); border-radius:8px; background:#fff; margin-top:4px; }
+  /* ✈ landed: the files a turn wrote or edited (from its ▸ Write/Edit tool boxes) — tap one to open it */
+  .landed{ margin:2px 0 10px; padding:7px 9px; border:1px solid rgba(79,227,168,.35); background:rgba(79,227,168,.05); border-radius:10px; }
+  .landed .lt{ font:10px ui-monospace,Menlo,monospace; color:var(--hot); letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px; }
+  .landed .lf{ display:flex; flex-wrap:wrap; gap:6px; }
+  .lchip{ display:inline-flex; align-items:center; gap:6px; max-width:100%; min-height:34px; padding:4px 10px; border-radius:8px; cursor:pointer;
+    background:var(--panel2); border:1px solid var(--rule); color:var(--ink); font:12px ui-monospace,Menlo,monospace; -webkit-tap-highlight-color:transparent; }
+  .lchip:hover{ border-color:var(--muted); }
+  .lchip .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lchip .k{ color:var(--hot); } .lchip .k.e{ color:var(--accent); }
+  .lchip img{ width:40px; height:40px; object-fit:cover; border-radius:5px; background:var(--bg); margin-left:-5px; }
   .pastethumbs{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .pastethumbs img{ max-width:min(260px,70vw); max-height:200px; border:1px solid var(--rule); border-radius:6px; cursor:zoom-in; background:var(--panel2); min-width:40px; min-height:30px; }
   .pastethumbs img.big{ max-width:100%; max-height:none; cursor:zoom-out; }
@@ -541,6 +562,7 @@
     <span id="dash"><span id="mem"></span><span id="gauge"></span></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span></span>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
+    <button id="filesbtn" style="display:none" title="this plane's files">📁</button>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
     <button id="gear">⚙</button>
   </header>
@@ -853,6 +875,7 @@ function closeSession(){
   placePut(p => { p.plane = null; });
   if (view) patch({ sessions: { [view]: { seenAt: Date.now() } } });
   stopModeSafe();
+  if (phonePage) phoneHome();
   view = null; render();
 }
 
@@ -1030,6 +1053,7 @@ function renderTarmac(){
   feedEl.classList.remove("on");
   colsEl.classList.remove("on");
   $("laybtn").style.display = "none";
+  $("filesbtn").style.display = "none";
   tarmacEl.classList.add("on");
   const apron = $("apron");
   // the apron is a SQUARE — biggest that fits, centered; positions AND sizes are
@@ -1616,18 +1640,24 @@ function renderSession(){
   setStat(s.running ? "warn" : off ? "bad" : "ok", s.running ? "flying…" : off ? "airfield offline" : "live");
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");
-  const wide = wideMode();
+  const wide = wideMode(), pg = wide ? null : phonePage;
   colsEl.classList.toggle("wide", wide);
+  colsEl.classList.toggle("pg-tree", pg === "tree");
+  colsEl.classList.toggle("pg-file", pg === "file");
+  colsEl.classList.toggle("pg-split", pg === "file" && autoLayout() === "wide");  // landscape: file | chat
   const lb = $("laybtn");
-  lb.style.display = "block";
+  lb.style.display = isPhone() ? "none" : "block";  // a phone never gets the 3 columns
   lb.textContent = wide ? "▭" : "▦";
+  const fb = $("filesbtn");
+  fb.style.display = wide ? "none" : "block";
+  fb.classList.toggle("act", !!pg);
   const tb = $("termbtn");
   tb.style.display = "block";
   tb.classList.toggle("act", termOn);
   $("termwrap").classList.toggle("on", termOn);
   feedEl.classList.toggle("on", !termOn);
   composer.classList.toggle("on", !termOn);
-  if (wide) {
+  if (wide || pg) {
     if (!exp[view]) { lastRunSeen[view] = s.lastRunEndedAt || 0; colsFor = view; if (expState().gitMode) loadGit(); else renderExplorer(); renderFileView(); }
     else if (colsFor !== view) { colsFor = view; lastRunSeen[view] = s.lastRunEndedAt || 0; refreshFs(); }  // columns still show another plane
     else if (s.lastRunEndedAt && lastRunSeen[view] !== s.lastRunEndedAt) { lastRunSeen[view] = s.lastRunEndedAt; refreshFs(); }
@@ -1669,8 +1699,9 @@ function renderEmber(s){
   setStat(["failed", "stalled", "unreachable"].includes(st) ? "bad" : st === "running" ? "warn" : "ok", "ember " + st);
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");
-  colsEl.classList.remove("wide");
+  colsEl.classList.remove("wide", "pg-tree", "pg-file", "pg-split");
   $("laybtn").style.display = "none";
+  $("filesbtn").style.display = "none";
   $("termbtn").style.display = "none";
   $("termwrap").classList.remove("on");
   feedEl.classList.remove("on");
@@ -1743,8 +1774,9 @@ function renderNote(s){
   setStat("ok", "note");
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");
-  colsEl.classList.remove("wide");
+  colsEl.classList.remove("wide", "pg-tree", "pg-file", "pg-split");
   $("laybtn").style.display = "none";
+  $("filesbtn").style.display = "none";
   $("termbtn").style.display = "none";
   $("termwrap").classList.remove("on");
   feedEl.classList.remove("on");
@@ -1832,13 +1864,59 @@ function boxSig(b, i, len){
   return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.queued, b.queued && !b.synced ? qWait() : "", !!b.err, !!b.sys, !!b.brief, b.stats || null, b.depth || 0,
     boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null]);
 }
+// a ▸ Write/Edit tool box → {rel, kind} when its file sits under the plane's cwd (file_path leads the JSON,
+// so the daemon's 300-char cut doesn't lose it). Bash-made files don't show up here.
+const LANDED_RE = /^▸ (Write|Edit|MultiEdit|NotebookEdit)\s+\{"(?:file_path|notebook_path)":("(?:[^"\\]|\\.)*")/;
+function toolFile(text, cwd){
+  const m = LANDED_RE.exec(text || "");
+  if (!m) return null;
+  let p;
+  try { p = JSON.parse(m[2]); } catch (_) { return null; }
+  if (p.startsWith("/")) {
+    const root = (cwd || "").replace(/\/+$/, "");
+    const tail = root.startsWith("~") ? root.slice(1) + "/" : null;  // "~/x" cwd: match on what follows the home dir
+    const at = tail ? p.indexOf(tail) : root && p.startsWith(root + "/") ? 0 : -1;
+    if (at < 0 || (tail && at === 0)) return null;
+    p = p.slice(at + (tail ? tail.length : root.length + 1));
+  }
+  p = p.replace(/^\.\//, "");
+  return p && !p.startsWith("../") ? { rel: p, kind: m[1] === "Write" ? "wrote" : "edited" } : null;
+}
+const FILE_ICON = { html: "🌐", md: "📝", img: "🖼", txt: "📄" };
+function landedHtml(it){
+  const n = it.landed.length;
+  return `<div class="landed"${it.d ? ` style="margin-left:${asideMl(it.d)}px"` : ""}><div class="lt">✈ landed · ${n} file${n > 1 ? "s" : ""}</div><div class="lf">${
+    it.landed.map(([rel, kind]) => {
+      const fmt = fileFmt(rel);
+      return `<button class="lchip" data-lfile="${esc(rel)}" title="${esc(kind + " · " + rel)}">${fmt === "img" ? `<img data-pimg="${esc(rel)}" alt="">` : `<span>${FILE_ICON[fmt]}</span>`}<span class="nm">${esc(rel.split("/").pop())}</span><span class="k${kind === "edited" ? " e" : ""}">${kind === "edited" ? "±" : "＋"}</span></button>`;
+    }).join("")}</div></div>`;
+}
+function openLanded(rel){
+  const st = expState();
+  if (st.dview) { st.dview = null; destroyDiff(); }
+  openFile(rel);
+  if (!wideMode()) phoneGo("file");
+}
 function reconcileFeed(msgs, s, boxes){
   const len = boxes.length;
   // render items = boxes, plus a day divider wherever the calendar day changes
   const items = [];
   let lastDay = null, prevD = 0;
+  // ✈ landed: each turn's written/edited files ride in a card after its last box (the running turn's once it lands)
+  const landed = new Map();
+  let lastKey = null, lastD = 0;
+  const flushLanded = () => {
+    if (landed.size) items.push({ key: "__landed-" + lastKey, landed: [...landed], d: lastD });
+    landed.clear();
+  };
   for (let i = 0; i < len; i++) {
     const b = boxes[i];
+    if (b.role === "user") flushLanded();
+    else {
+      lastKey = b.key; lastD = b.depth || 0;
+      const f = b.role === "tool" && toolFile(b.text, s.cwd);
+      if (f) landed.set(f.rel, landed.get(f.rel) === "wrote" ? "wrote" : f.kind);
+    }
     if (b.ts) {
       const k = dayKey(b.ts);
       if (k !== lastDay) { items.push({ key: "__day-" + k, ts: b.ts }); lastDay = k; }
@@ -1848,6 +1926,7 @@ function reconcileFeed(msgs, s, boxes){
     prevD = d;
     items.push({ key: b.key, b, i });
   }
+  if (!s.running) flushLanded();
   const want = new Set(items.map(x => x.key));
   for (const el of [...msgs.children]) {
     const k = el.dataset.bk;
@@ -1867,11 +1946,13 @@ function reconcileFeed(msgs, s, boxes){
     let el = msgs.querySelector(`:scope > [data-bk="${it.key}"]`);
     const sig = it.b ? boxSig(it.b, it.i, len)
       : it.aside ? "A" + it.aside.d + (confirming === "zap:" + it.aside.start ? "!" : "")
+      : it.landed ? "L" + it.d + JSON.stringify(it.landed)
       : dayLabel(it.ts); // label in sig → midnight rollover self-corrects
     if (el && el.dataset.sig === sig) { prev = el; continue; }
     const tpl = document.createElement("template");
     tpl.innerHTML = it.b ? turnHtml(it.b, it.i, len).trim()
       : it.aside ? asideBarHtml(it.aside)
+      : it.landed ? landedHtml(it)
       : `<div class="daysep">— ${esc(dayLabel(it.ts))} —</div>`;
     const fresh = tpl.content.firstElementChild;
     fresh.dataset.bk = it.key; fresh.dataset.sig = sig;
@@ -1900,6 +1981,7 @@ feedEl.addEventListener("click", (e) => {
   const s = sess(view);
   const hit = (sel) => e.target.closest && e.target.closest(sel);
   let t;
+  if ((t = hit("[data-lfile]"))) { openLanded(t.dataset.lfile); return; }
   if ((t = hit("[data-esave]"))) {
     const key = t.dataset.esave;
     const text = $("edit-" + key).value;
@@ -2424,9 +2506,39 @@ document.addEventListener("focusout", () => setTimeout(() => {
   if (view) render(); else if (doc[0]) renderTarmac();
 }, 400));
 function wideMode(){
+  if (isPhone()) return false;
   const mine = view ? (place().lay || {})[view] : null;
   return (mine || layoutOverride || autoLayout()) === "wide";
 }
+// ---------- narrow / phone file pages: 📁 → tree → file, each a whole page ----------
+// Each step is a history entry, so ‹ and the system back gesture (Android back, iOS edge swipe) pop it.
+// state.d = how many of our entries are stacked, so 📁 / leaving the plane can unwind them all at once.
+function isPhone(){ return matchMedia("(pointer:coarse)").matches && Math.min(screen.width, screen.height) < 500; }
+let phonePage = null;  // null = chat | "tree" | "file" — ignored while wide
+function filesShown(){ return !!view && (wideMode() || !!phonePage); }
+function phoneGo(p){
+  if (p === phonePage) return;
+  if (p) history.pushState({ pp: p, plane: view, d: ((history.state && history.state.d) || 0) + 1 }, "");
+  phonePage = p;
+  if (!p) colsFor = null;  // hidden now — rebuild on the next visit
+  render();
+}
+function phoneBack(){ if (history.state && history.state.pp) history.back(); else phoneGo(null); }
+function phoneHome(){
+  const d = (history.state && history.state.d) || 0;
+  phonePage = null; colsFor = null;
+  if (d) history.go(-d);
+}
+addEventListener("popstate", (e) => {
+  const st = e.state, p = st && st.plane === view ? st.pp : null;
+  if (p === phonePage) return;
+  phonePage = p;
+  if (!p) colsFor = null;
+  if (view) render();
+});
+const phBack = () => !wideMode() && phonePage ? `<button class="phback" title="back">‹</button>` : "";
+["explorer", "fileview"].forEach((id) => $(id).addEventListener("click", (e) => { if (e.target.closest(".phback")) phoneBack(); }));
+$("filesbtn").addEventListener("click", () => { if (phonePage) { phoneHome(); render(); } else phoneGo("tree"); });
 $("laybtn").addEventListener("click", () => {
   const next = wideMode() ? "narrow" : "wide";
   if (view) placePut((p) => { (p.lay = p.lay || {})[view] = next; });
@@ -2500,10 +2612,10 @@ async function loadDir(rel){
   renderExplorer();
 }
 function renderExplorer(){
-  if (!view || !wideMode()) return;
+  if (!filesShown()) return;
   const st = expState(), s = sess(view);
   if (st.gitMode) return renderGitPanel();
-  let html = `<div class="exphead"><span>${esc((s.cwd || "hangar").split("/").pop())}</span><button id="expgit" title="git view">⎇</button><button id="expnew" title="new file">＋</button><button id="expref" title="refresh">↻</button></div>`;
+  let html = `<div class="exphead">${phBack()}<span>${esc((s.cwd || "hangar").split("/").pop())}</span><button id="expgit" title="git view">⎇</button><button id="expnew" title="new file">＋</button><button id="expref" title="refresh">↻</button></div>`;
   const walk = (rel, depth) => {
     const entries = st.cache[rel];
     if (!entries || entries === "loading") { html += `<div class="expempty" style="padding-left:${8 + depth * 14}px">…</div>`; if (!entries) loadDir(rel); return; }
@@ -2528,7 +2640,7 @@ function renderExplorer(){
     saveExpCfg();
     renderExplorer();
   }));
-  ex.querySelectorAll("[data-file]").forEach(el => el.addEventListener("click", () => openFile(el.dataset.file)));
+  ex.querySelectorAll("[data-file]").forEach(el => el.addEventListener("click", () => { openFile(el.dataset.file); if (!wideMode()) phoneGo("file"); }));
   const rb = ex.querySelector("#expref");
   if (rb) rb.addEventListener("click", () => refreshFs());
   const nb = ex.querySelector("#expnew");
@@ -2574,10 +2686,10 @@ function gitLogHtml(raw){
   }).join("");
 }
 function renderGitPanel(){
-  if (!view || !wideMode()) return;
+  if (!filesShown()) return;
   const st = expState();
   const ex = $("explorer");
-  let html = `<div class="exphead"><span>⎇ git</span><button id="gfiles" title="file explorer">📁</button><button id="gref" title="refresh">↻</button></div>`;
+  let html = `<div class="exphead">${phBack()}<span>⎇ git</span><button id="gfiles" title="file explorer">📁</button><button id="gref" title="refresh">↻</button></div>`;
   if (st.gitStatus == null) html += `<div class="gitempty">…</div>`;
   else if (!st.gitStatus.ok) html += `<div class="gitempty">✗ ${esc(st.gitStatus.error || "not a git repo?")}</div>`;
   else {
@@ -2594,8 +2706,8 @@ function renderGitPanel(){
   if (fb) fb.addEventListener("click", () => { st.gitMode = false; saveExpCfg(); st.dview = null; destroyDiff(); renderExplorer(); renderFileView(); });
   const rb = ex.querySelector("#gref");
   if (rb) rb.addEventListener("click", loadGit);
-  ex.querySelectorAll("[data-gf]").forEach((el) => el.addEventListener("click", () => openGitDiff(el.dataset.gf)));
-  ex.querySelectorAll("[data-gh]").forEach((el) => el.addEventListener("click", () => openGitCommit(el.dataset.gh)));
+  ex.querySelectorAll("[data-gf]").forEach((el) => el.addEventListener("click", () => { openGitDiff(el.dataset.gf); if (!wideMode()) phoneGo("file"); }));
+  ex.querySelectorAll("[data-gh]").forEach((el) => el.addEventListener("click", () => { openGitCommit(el.dataset.gh); if (!wideMode()) phoneGo("file"); }));
 }
 async function openGitDiff(rel){
   const st = expState();
@@ -2662,7 +2774,7 @@ async function openFile(rel, edit){
   if (edit) st.editing = true;
   placePut(p => { (p.files = p.files || {})[view] = rel; (p.edits = p.edits || {})[view] = !!st.editing; });
   st.sel = rel; st.selData = null; st.fvfmt = null;
-  if (!wideMode()) colsFor = null;  // columns not rendered now — rebuild on next wide entry
+  if (!filesShown()) colsFor = null;  // columns not rendered now — rebuild on next wide entry
   renderExplorer(); renderFileView();
   try { st.selData = await fsFetch("read", rel); } catch (e) { st.selData = { ok: false, error: e.message }; }
   renderFileView();
@@ -2688,14 +2800,14 @@ function fileFmt(rel){
   return "txt";
 }
 function renderFileView(){
-  if (!view || !wideMode()) return;
+  if (!filesShown()) return;
   const st = expState(), fv = $("fileview");
   if (fvEd && !st.editing) destroyEditor();  // stale editor after a plane switch
   if (diffEd && !st.dview) destroyDiff();
   if (st.dview) {
     const dv = st.dview;
     fv.innerHTML = `
-      <div class="fvhead"><span class="fvpath">⎇ ${esc(dv.title)}</span><span class="fvsize"></span><button id="dclose" title="close diff">×</button></div>
+      <div class="fvhead">${phBack()}<span class="fvpath">⎇ ${esc(dv.title)}</span><span class="fvsize"></span><button id="dclose" title="close diff">×</button></div>
       <div class="fvbody${dv.kind === "file" ? " fvedit" : ""}">${
         dv.loading ? (dv.kind === "file" ? `<div class="fveditor" id="dhost">loading…</div>` : `<div class="fvnote">loading…</div>`)
         : dv.kind === "file" ? `<div class="fveditor" id="dhost"></div>`
@@ -2703,11 +2815,12 @@ function renderFileView(){
     fv.querySelector("#dclose").addEventListener("click", () => {
       st.dview = null; destroyDiff(); renderFileView();
       if (st.gitMode) renderGitPanel();
+      if (!wideMode() && phonePage === "file") phoneBack();
     });
     if (dv.kind === "file" && !dv.loading) mountDiff(dv);
     return;
   }
-  if (!st.sel) { fv.innerHTML = `<div class="fvnote">pick a file on the left — it shows here</div>`; return; }
+  if (!st.sel) { fv.innerHTML = (phBack() ? `<div class="fvhead">${phBack()}</div>` : "") + `<div class="fvnote">pick a file on the left — it shows here</div>`; return; }
   const d = st.selData;
   if (st.editing && d) {
     if (!d.ok || d.binary || d.truncated) {
@@ -2726,7 +2839,7 @@ function renderFileView(){
   else if (fmt === "md") body = `<div class="text md">${mdHtml(d.text || "")}</div>`;
   else body = `<pre class="fvpre">${esc(d.text || "")}</pre>` + (d.truncated ? `<div class="fvnote">truncated at 512k of ${fmtSize(d.size)}</div>` : "");
   fv.innerHTML = `
-    <div class="fvhead"><span class="fvpath">${esc(st.sel)}</span><span class="fvsize">${d && d.size != null ? fmtSize(d.size) : ""}</span>
+    <div class="fvhead">${phBack()}<span class="fvpath">${esc(st.sel)}</span><span class="fvsize">${d && d.size != null ? fmtSize(d.size) : ""}</span>
       ${auto === "img" ? "" : `<button id="fvfmt">${fmt}</button>`}${d && d.ok && !d.binary && auto !== "img" ? `<button id="fvedit" title="edit">✎</button>` : ""}<button id="fvref" title="reload">↻</button></div>
     <div class="fvbody">${body}</div>`;
   const fr = fv.querySelector(".fvframe");
@@ -2786,7 +2899,7 @@ function closeEditor(force){  // true = closed; false = user kept unsaved change
 }
 function renderEditor(fv, st, d){
   fv.innerHTML = `
-    <div class="fvhead"><span class="fvpath">✎ ${esc(st.sel)}</span><span class="fvsize" id="fvdirty"></span>
+    <div class="fvhead">${phBack()}<span class="fvpath">✎ ${esc(st.sel)}</span><span class="fvsize" id="fvdirty"></span>
       <button id="fvsave">save</button><button id="fvdone">done</button></div>
     <div class="fvbody fvedit"><div class="fveditor" id="fveditor">loading monaco…</div></div>`;
   fv.querySelector("#fvsave").addEventListener("click", saveFile);
@@ -2841,7 +2954,7 @@ async function saveFile(){
 }
 
 function refreshFs(){  // after a run or plane switch: relist everything open, reload the open file
-  if (!view || !wideMode()) return;
+  if (!filesShown()) return;
   const st = expState();
   st.cache = {};
   if (st.gitMode) { loadGit(); renderFileView(); return; }
