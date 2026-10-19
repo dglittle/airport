@@ -50,7 +50,9 @@
   #pv{ font:8px ui-monospace,Menlo,monospace; color:var(--dim); margin-left:4px; letter-spacing:.02em; }
   #pv:empty{ display:none; }
   #dash{ margin-left:auto; flex:0 0 auto; display:flex; gap:.8em; align-items:center; }
-  #dash:has(#mem:empty):has(#gauge:empty){ display:none; }
+  /* hidden while both meters are empty: a class set from JS (syncDash), NOT :has(:empty) —
+     iOS WebKit never re-checked :has(:empty) after innerHTML filled them, so the dials stayed hidden */
+  #dash.off{ display:none; }
   .hbreak{ display:none; }
   header .stat .dot{ width:7px; height:7px; border-radius:50%; background:var(--dim); }
   header .stat.ok .dot{ background:var(--hot); }
@@ -561,7 +563,7 @@
     <b id="hdr-title">✈ airport</b>
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
     <span class="hbreak"></span>
-    <span id="dash"><span id="mem"></span><span id="gauge"></span></span>
+    <span id="dash" class="off"><span id="mem"></span><span id="gauge"></span></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span><span id="pv" title="page version: the tower stamps this when it serves the page; compare with what a plane says is live"></span></span>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="filesbtn" style="display:none" title="this plane's files">📁</button>
@@ -1010,6 +1012,12 @@ function renderMem(d){
     (cx.n ? `<span class="cl">☀${cx.n}</span><span class="rss">${fmtB(cx.rss)}</span>` : "");
 }
 setInterval(() => renderMem(), 15000); // greys out if the tower stops pushing
+
+// #dash shows once either meter has content (see the #dash.off CSS for why this isn't :has(:empty))
+function syncDash(){ $("dash").classList.toggle("off", !$("mem").firstChild && !$("gauge").firstChild); }
+new MutationObserver(syncDash).observe($("mem"), { childList: true });
+new MutationObserver(syncDash).observe($("gauge"), { childList: true });
+syncDash();
 
 // ---------- the gauge hover card: every limit window the API reports ----------
 const WIN_LABEL = { "5h": "5h", "7d": "7d", "7d_oi": "f7d" };  // same names as the header dials  // friendlier names where we have them
