@@ -93,6 +93,15 @@
   #selbox{ position:absolute; display:none; border:1px dashed var(--accent); background:rgba(232,161,60,.08);
     border-radius:4px; pointer-events:none; z-index:5; }
   #selbox.on{ display:block; }
+  /* the selection's own chip, floating at the apron's bottom-left (mirror of ＋): it never
+     touches the header, so selecting doesn't reflow the page (the header used to grow a line) */
+  #selchip{ position:absolute; left:calc(var(--S)*0.02); bottom:calc(var(--S)*0.035); z-index:6; display:none;
+    align-items:center; gap:4px; padding:0 2px 0 10px; height:30px; border-radius:15px;
+    background:rgba(11,18,32,.9); border:1px solid var(--accent); color:var(--accent);
+    font:12px ui-monospace,Menlo,monospace; white-space:nowrap; -webkit-user-select:none; user-select:none; }
+  #selchip.on{ display:flex; }
+  #selchip button{ background:none; border:0; color:var(--ink); font-size:15px; width:28px; height:28px; padding:0;
+    border-radius:50%; cursor:pointer; -webkit-tap-highlight-color:transparent; }
   .plane.dragging{ box-shadow:0 calc(var(--S)*0.015) calc(var(--S)*0.05) rgba(0,0,0,.6); }
   .plane .unread{
     position:absolute; top:calc(var(--S)*-0.012); right:calc(var(--S)*-0.012);
@@ -531,7 +540,7 @@
   </header>
   <div id="gaugetip"></div>
 
-  <div id="tarmac"><div id="apron"><button id="addplane">＋</button><div id="selbox"></div></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
+  <div id="tarmac"><div id="apron"><button id="addplane">＋</button><div id="selbox"></div><div id="selchip" title="drag any selected plane to move them together · tap empty tarmac or Esc to clear"><span id="selcount"></span><button id="selclear" aria-label="clear selection">✕</button></div></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
   <div id="cols">
     <div id="explorer"></div>
@@ -1008,9 +1017,9 @@ function renderTarmac(){
   $("hdr-icon").classList.remove("on");
   const hh = hosts(), up = Object.keys(hh).filter(hostUp);
   for (const id of [...selected]) if (!sessions()[id]) selected.delete(id);  // deleted under us
-  $("hdr-sub").textContent = selected.size
-    ? `${selected.size} selected — drag one to move them together · tap empty tarmac (or Esc) to clear`
-    : up.length ? "airfields up: " + up.join(", ") : "no ground crew online";
+  $("hdr-sub").textContent = up.length ? "airfields up: " + up.join(", ") : "no ground crew online";
+  $("selcount").textContent = selected.size + " selected";
+  $("selchip").classList.toggle("on", selected.size > 0);
   composer.classList.remove("on");
   feedEl.classList.remove("on");
   colsEl.classList.remove("on");
@@ -1178,6 +1187,8 @@ function endBand(){
 tarmacEl.addEventListener("pointerup", endBand);
 tarmacEl.addEventListener("pointercancel", endBand);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !view && selected.size) { selected.clear(); renderTarmac(); } });
+$("selchip").addEventListener("pointerdown", (e) => e.stopPropagation());   // not a rubber band
+$("selclear").addEventListener("click", (e) => { e.stopPropagation(); selected.clear(); renderTarmac(); });
 
 // ---------- create session (pure data — a session is born as a patch) ----------
 function hostOptions(sel){
