@@ -720,6 +720,35 @@ const tarmacEl = $("tarmac"), feedEl = $("feed"), composer = $("composer"), cols
 
 function esc(x){ const d = document.createElement("div"); d.textContent = x == null ? "" : String(x); return d.innerHTML; }
 $("pv").textContent = /^[0-9a-f]{4,}$/.test(PAGE_VER) ? "v" + PAGE_VER.slice(0, 4) : "";   // which page this phone is really running
+// tap the version marker = 📋 diagnostics: what this device actually sees (tower, viewport/zoom, usage
+// data, where the header dials are and what's on top of them), saved as a 📝 note "diag-<device>" on
+// the tarmac so a plane can read it. Nothing secret goes in (no pass).
+$("pv").style.cursor = "pointer";
+$("pv").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
+  const g = $("gauge"), d = $("dash"), gb = g.getBoundingClientRect();
+  const top = document.elementFromPoint(gb.left + gb.width / 2, gb.top + gb.height / 2);
+  const u = (doc[0] && doc[0].usage) || {};
+  const vv = window.visualViewport;
+  const info = {
+    at: new Date().toISOString(), pageVer: PAGE_VER, page: location.origin + location.pathname, tower: BASE,
+    ua: navigator.userAgent, inner: [innerWidth, innerHeight], client: [document.documentElement.clientWidth, document.documentElement.clientHeight],
+    screen: [screen.width, screen.height], dpr: devicePixelRatio, zoom: vv ? +vv.scale.toFixed(3) : null, vvOffset: vv ? [Math.round(vv.offsetLeft), Math.round(vv.offsetTop)] : null,
+    isPhone: isPhone(), view, wide: view ? wideMode() : null,
+    usage: Object.fromEntries(Object.entries(u).map(([k, a]) => [k, { at: a && a.at, ageMin: a && a.at ? Math.round((Date.now() - a.at) / 60000) : null, err: (a && a.err) || null, five: a && a.five, seven: a && a.seven }])),
+    gaugeHTML: g.innerHTML.length, gaugeRect: r(g), dashRect: r(d), dashStyle: (() => { const c = getComputedStyle(d); return [c.display, c.visibility, c.opacity]; })(),
+    gaugeStyle: (() => { const c = getComputedStyle(g); return [c.display, c.visibility, c.opacity, c.fontSize]; })(),
+    onTopOfGauge: top ? (top.id || top.className || top.tagName) + "" : null,
+    header: r(document.querySelector("header")), headerChildren: [...document.querySelector("header").children].map((c) => (c.id || c.className || c.tagName) + ":" + r(c).join(",")),
+    subFont: getComputedStyle($("hdr-sub")).fontSize,
+  };
+  const dev = (/iPhone|iPad/.test(navigator.userAgent) ? "iphone" : /Android/.test(navigator.userAgent) ? "android" : "desktop") + "-" + innerWidth;
+  const id = "diag-" + dev;
+  patch({ sessions: { [id]: { kind: "note", title: "📋 diag " + dev, emoji: "📋", text: JSON.stringify(info, null, 1),
+    x: 0.5, y: 0.08, createdAt: Date.now(), editedAt: Date.now() } } });
+  alert("📋 diagnostics saved as the note \"" + id + "\" on the tarmac.\n\ntower: " + BASE + "\nzoom: " + info.zoom + "\nwidth: " + innerWidth + "\nusage accounts: " + Object.keys(u).length + "\ndials drawn: " + (info.gaugeHTML > 0 ? "yes" : "NO") + " at " + JSON.stringify(info.gaugeRect));
+});
 function setStat(k, m){ $("stat").className = "stat " + k; $("stat-txt").textContent = m; }
 function sessions(){ return (doc[0] && doc[0].sessions) || {}; }
 function hosts(){ return (doc[0] && doc[0].hosts) || {}; }
