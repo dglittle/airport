@@ -84,6 +84,11 @@
     transition:border-color .2s, box-shadow .2s;
   }
   .plane.note{ --ring:repeating-conic-gradient(rgba(143,165,192,.7) 0 6deg,transparent 0 13deg); }
+  /* 📝 a note shows its own text, tiny, like a sticky note (sized to the tile: cqw); fades where it overflows */
+  .plane > .ntext{ position:absolute; inset:8% 9%; overflow:hidden; text-align:left; pointer-events:none;
+    font:500 max(4px,7.2cqw)/1.28 -apple-system,system-ui,sans-serif; color:var(--ink); opacity:.82;
+    white-space:pre-wrap; overflow-wrap:anywhere;
+    -webkit-mask-image:linear-gradient(#000 72%,transparent); mask-image:linear-gradient(#000 72%,transparent); }
   /* 🔥 ember tiles: long-running work with a URL; the tower stamps s.em from the ember's /state */
   .plane.ember{ --ring:conic-gradient(#e07a2c calc(var(--e,0)*1turn),rgba(224,122,44,.22) 0); }
   .plane.ember.live{ box-shadow:0 0 calc(var(--S)*0.03) rgba(224,122,44,.35); }
@@ -1164,6 +1169,7 @@ function renderTarmac(){
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}
         ${isEmber && s.frame && s.url ? `<div class="eframe"><iframe src="${esc(s.url)}" tabindex="-1" scrolling="no" referrerpolicy="no-referrer" title="${esc(name)}"></iframe></div>`
+        : isNote && String(s.text || "").trim() ? `<div class="ntext">${esc(String(s.text).replace(/^\s*\n/, "").slice(0, 600))}</div>`
         : `<div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>`}
         <div class="cap"><div class="name">${esc(name)}</div></div>${qn ? `<div class="qn" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
