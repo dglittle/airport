@@ -180,7 +180,9 @@ lists and scratch pads that should live where the work lives.
 A plane's turn ends when it replies. Work that has to keep going (a batch of
 hundreds of sessions, a long eval, something waiting on CI) runs as an
 **ember**: long-running work with a URL that serves a dashboard, a live state
-stream and a stop button. The contract is at
+stream and a stop button. Each ember is **its own process**: it outlives the
+turn that started it, and airport only shows and steers it. The contract (plus
+a minimal example and a client) is at
 [github.com/dglittle/ember](https://github.com/dglittle/ember).
 
 - **A tile** is `{kind:"ember", url}` on the tarmac: `tarmac.js ember <tile>
