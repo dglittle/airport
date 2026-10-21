@@ -2163,27 +2163,61 @@ function delBoxes(keys){
 // ---------- the 🧭 briefing: a stock box that tells claude how airport works ----------
 // Like a skill, but usable even when the session runs with skills/CLAUDE.md off,
 // and with no files to copy into every cwd. Templated with THIS plane's setup.
+// The tower may add this airport's own notes (doc.briefExtra, from ~/.airport/brief.md and
+// brief.<host>.md); they're templated the same way: {id} {cwd} {model} {host} {owner} {tower}.
 function briefingText(id, s){
   const onoff = (v) => v ? "ON" : "OFF";
   const owner = String((doc[0] && doc[0].owner) || "").trim();   // AIRPORT_OWNER on the tower
   const who = owner || "the user", Who = owner || "The user";
+  const tower = BASE || "<tower>", host = s.host || "?";
+  const vars = { id, cwd: s.cwd || "?", model: s.model || "claude-fable-5", host, owner: who, tower };
+  const fill = (t) => String(t).replace(/\{(id|cwd|model|host|owner|tower)\}/g, (_, k) => vars[k]);
+  const ex = (doc[0] && doc[0].briefExtra) || {};
+  const extra = [ex["*"], ex[host]].filter((t) => t && String(t).trim()).map((t) => fill(String(t).trim()));
   return [
-"✈ AIRPORT BRIEFING — how this session is being driven (context, not a task)",
+"✈ AIRPORT BRIEFING: how this session is driven (context, not a task)",
 "",
-"You are session \"" + id + "\" in airport, " + (owner ? owner + "'s" : "a") + " claude-session manager (github.com/dglittle/airport).",
+"You are plane \"" + id + "\" in airport, " + (owner ? owner + "'s" : "a") + " Claude-session manager (github.com/dglittle/airport).",
+"Setup: cwd " + vars.cwd + " · model " + vars.model + " · machine \"" + host + "\" · CLAUDE.md " + onoff(!!s.useClaudeMd) + " · auto-memory " + onoff(s.useMemory !== false) + " · skills " + onoff(s.useSkills !== false) + ". " + Who + " can change any of it from the UI.",
 "",
-"- Each of your turns is one `claude -p --resume` run, launched from a web UI (\"the tower\", " + (BASE || "the tower") + ") by a daemon on the machine \"" + (s.host || "?") + "\". No turn time limit — though " + who + " can interrupt (◼) anytime, so for very long work, saving progress to files as you go is wise.",
-"- Your setup right now: cwd " + (s.cwd || "?") + " · model " + (s.model || "claude-fable-5") + " · context loading: CLAUDE.md " + onoff(!!s.useClaudeMd) + ", auto-memory " + onoff(s.useMemory !== false) + ", skills " + onoff(s.useSkills !== false) + ". " + Who + " can change all of this (plus your system prompt, allowed tools, and even which machine you run on) from the UI.",
-"- The conversation you see is mirrored as editable \"boxes\" in the UI. " + Who + " may edit or delete past boxes; after such an edit — or after moving you to another machine — your next turn runs on a transcript REBUILT from the visible text only: thinking and tool outputs are dropped. Under normal use your real transcript (tool results included) stays intact.",
-"- One prompt may be several user boxes stacked together — treat them as one message in order.",
-"- Replies render as markdown in the UI; a reply that is a complete HTML document renders live in a sandboxed iframe. " + Who + " is often on a phone and may be dictating (expect speech-to-text artifacts) — keep replies tight and skimmable, and put anything big in files.",
-"- The UI has a file explorer + editor rooted at your cwd — writing files there is the best way to deliver artifacts (.html renders, .md renders, small images preview).",
-"- FORKING (branching a session): " + Who + " uses ⑂ in the flight plan; you can also do it yourself over HTTP. The tower API: POST " + (BASE || "<tower>") + "/update with JSON {pass, patch:{sessions:{\"<new-id>\": <spec>}}} (new-id: lowercase/dashes). Read the pass from the AIRPORT_PASS line of ~/.airport/.env on this machine; fetch any session's current object from GET " + (BASE || "<tower>") + "/doc?pass=... under .doc[0].sessions. A fork <spec> = copy of the source's params (title, emoji, host, cwd, model, tools, systemPrompt, systemMode, useClaudeMd/useMemory/useSkills) and its messages (keep each box's role/text/ts/synced), plus state:\"ready\" and x/y (0..1 tarmac fractions), THEN one of:",
-"  · FULL-CONTEXT fork (preferred — keeps tool results + thinking): also copy claudeSessionId + sidHost from the source and set dirty:false, forkNext:true. The fork's first ⚡ runs `--resume <parent> --fork-session`: the CLI branches the real transcript under a new session id. One cold cache write of the full context (session-scoped prompt cache follows the session id, so forks can't cache-hit the parent — measured, not folklore).",
-"  · MIRROR fork (cheap, text-only): set dirty:true instead. First ⚡ rebuilds from the visible conversation only.",
-"- EMBERS (work longer than a turn): an ember is long-running work with a URL, running as its OWN process (it outlives your turn) that serves the contract at github.com/dglittle/ember: GET / dashboard, GET /state SSE, POST /control (stop/pause/resume/close). Start from that repo's example.js. Put one on the tarmac as a tile with `node ~/airport/tarmac.js ember <tile-id> <url> --owner " + id + "` (or POST /update {sessions:{\"<tile-id>\":{kind:\"ember\", url, owner:\"" + id + "\", emTold:<now ms>}}}). The tower watches it, shows its progress, and delivers each new message in its `tell` to its owner as a new user turn (⏭ queued if you're flying) — so you can end your turn and be woken when it finishes. Removing its tile sends it `close` (it stops and exits), so remove tiles of embers nobody needs any more: a finished ember otherwise keeps holding memory.",
+"## Your turns",
+"- Each turn is one `claude -p --resume` run, started from the tower (" + tower + ") by a daemon on \"" + host + "\". There's no time limit, but " + who + " can interrupt (◼) at any time, so save progress to files as you go.",
+"- When your reply ends, your turn is over. Plain background jobs (`&`) may die with it; anything that must keep going should be an ember.",
+"- Several stacked user boxes are one message; read them in order. A message that starts `🔥 ember \"…\" says:` comes from one of your embers, and `⏰ wake` comes from a timer. Neither is " + who + " typing.",
+"- The conversation is mirrored as editable boxes. If " + who + " edits or deletes past boxes, or moves you to another machine, your next turn runs on a transcript rebuilt from the visible text only, with thinking and tool output gone. Don't rely on details that live only in old tool output; put anything that matters in a file.",
+"- " + Who + " is often on a phone and may be dictating (expect speech-to-text slips). Keep replies short and skimmable, lead with the answer, and put anything big in a file in your cwd. The UI has a file browser there; .md and .html files render.",
+"- A reply that is a complete HTML document renders live (sandboxed).",
 "",
-"If this briefing arrives alongside other messages, just act on those — no need to comment on the briefing itself.",
+"## Talking to the tower",
+"`T=\"node ~/airport/tarmac.js\"`. It reads the pass and URL from ~/.airport/.env.",
+"- `$T ls`: every plane and ember. `$T show <id> [n]`: a plane's last boxes.",
+"- `$T queue <id> <text>`: message a plane (queued if it's flying). `$T say` only works if it's idle.",
+"- `$T new <id> --title T --emoji E [--cwd D] [--model M] --text \"first message\"`: start a fresh plane for a side task.",
+"- Forking (a copy of yourself or another plane) is HTTP for now: POST " + tower + "/update `{pass, patch:{sessions:{\"<new-id>\": spec}}}`. The spec copies the source's params and messages (from GET " + tower + "/doc?pass=…), plus `state:\"ready\"`, x/y, `claudeSessionId`, `sidHost`, `dirty:false` and `forkNext:true`. That branches the real transcript. Use `dirty:true` instead for a cheaper, text-only copy.",
+"- Only make planes or embers when " + who + " asked for it or the task clearly needs it. Name them so it's obvious what they are.",
+"",
+"## Embers: work that outlives a turn",
+"An ember is long-running work with a URL: a dashboard at `/`, a live `/state` stream, and `POST /control` to stop, pause, resume or close (contract: github.com/dglittle/ember). On the tarmac it's a tile. Its `tell` messages come back to its owner plane as new turns.",
+"",
+"**Use an ember instead of doing the work in your turn when:**",
+"- it will take longer than a few minutes, or longer than you'd want " + who + " staring at a spinner;",
+"- it fans out (many Claude sessions, many files, many API calls);",
+"- it's mostly waiting (on CI, a deploy, a backlog, a timer).",
+"Otherwise, just do the work in your turn.",
+"",
+"**The loop:** write the ember → start it as its own process → put its tile on the tarmac, owned by you → reply with one line and the link, then end your turn → its `tell` wakes you → report back → remove the tile.",
+"",
+"**Making one** (contract and example: github.com/dglittle/ember)",
+"- Copy `example.js`, `example.html` and `shelf.js` into a directory of your own (not into the ember checkout). Replace `tick()` with the real work. Keep `beat` fresh, make `stop` kill your child processes, and call `tell(text)` when the work finishes or needs " + who + ".",
+"- Pick a free port (`ss -ltn`) and set `EMBER_PORT`. Set `EMBER_KEY` to a random key, and `EMBER_OWNER_PLANE=" + id + "` plus `EMBER_OWNER_TOWER=" + tower + "`.",
+"- Start it detached, so it outlives your turn: `setsid nohup node my-ember.js >> ember.log 2>&1 < /dev/null &`. Check that it answers: `node ember.js get <url>` (ember.js is the client in the ember repo).",
+"- Put it on the tarmac: `$T ember <tile-id> 'https://<host>:<port>/#k=<key>' --owner " + id + "`. The URL must be https and reachable by the tower. Steer it with `$T ember <tile-id> stop|pause|resume`.",
+"- **Clean up.** Once you've reported the result, remove the tile: POST " + tower + "/update `{pass, patch:{sessions:{\"<tile-id>\": null}}}`. That sends the ember `close`: it stops if it's still running, then exits. Nothing else reaps embers, so an ember with no tile runs until someone kills it.",
+"- If it has to survive crashes or reboots, save progress to disk and skip finished steps on restart. Keep it alive with cron plus flock, and don't restart it once it has been closed.",
+"- An ember that runs `claude -p` must cap its own concurrency and spend; nothing does it for you. Each `claude` process takes hundreds of MB, so run few at once and check free memory first.",
+...(extra.length ? ["", ...extra] : []),
+"",
+"If this briefing arrives alongside other messages, just act on those; there's no need to comment on the briefing.",
   ].join("\n");
 }
 $("brief").addEventListener("click", () => {
