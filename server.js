@@ -610,6 +610,19 @@ function hashHtml() {
 HTML_VER = hashHtml();
 apply({ pageVersion: HTML_VER });
 apply({ owner: process.env.AIRPORT_OWNER || null }); // whose airport: the 🧭 briefing names them (unset = "the user")
+// this airport's own notes for the 🧭 briefing: STATE_DIR/brief.md (every plane) + brief.<host>.md (planes on
+// that machine). Optional, re-read on change; templated in the page ({id} {cwd} {model} {host} {owner} {tower}).
+function loadBriefExtra() {
+  const o = {};
+  try { for (const f of fs.readdirSync(STATE_DIR)) {
+    const m = /^brief(?:\.([A-Za-z0-9._-]+))?\.md$/.exec(f); if (!m) continue;
+    try { o[m[1] || "*"] = fs.readFileSync(path.join(STATE_DIR, f), "utf8").slice(0, 8000); } catch (_) {}
+  } } catch (_) {}
+  for (const k of Object.keys(doc[0].briefExtra || {})) if (!(k in o)) o[k] = null;   // a removed file: delete its key
+  apply({ briefExtra: o });   // a no-op unless something changed (shelf_merge)
+}
+loadBriefExtra();
+setInterval(loadBriefExtra, 30000);
 fs.watchFile(HTML, { interval: 2000 }, () => {
   const v = hashHtml();
   if (v && v !== HTML_VER) { HTML_VER = v; apply({ pageVersion: v }); }
