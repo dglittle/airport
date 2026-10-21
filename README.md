@@ -199,15 +199,21 @@ stream and a stop button. The contract is at
   dashboard for that size. Each live tile holds its own `/state` stream open.
 - **Opening the tile** shows the ember's own dashboard in an iframe, under a
   native bar: ⏸ ▶ ■ (whatever its `controls` allow), ↗ to open it in its own
-  tab, the plane its messages go to, and ✕ to remove the tile (the ember keeps
-  running).
+  tab, the plane its messages go to, and ✕ to remove the tile.
+- **Removing a tile closes the ember.** Whatever path removes the tile (✕, a
+  group delete, a plane's `/update`), the tower sends the ember the contract's
+  `close` control: it stops if it's still running, then shuts down. Otherwise
+  finished embers would keep serving forever and hold their memory. If another
+  tile still shows the same URL, nothing is sent. An ember that predates
+  `close` just answers 409, and the box meter's card (below) shows what it's
+  holding.
 - **Messages come back.** Each new entry in the ember's `tell` goes to its
   owner plane (the tile's `owner`, else the ember's own `owner.plane` if its
   `owner.tower` is this tower) as a user turn. It flies now if the plane is
   idle, and is ⏭ queued if it's flying. So a plane can start an ember, end its
   turn, and be woken when the ember finishes. `emTold` records the newest
   message already handled, so a restart doesn't resend.
-- `POST /ember {pass, id, action}` steers it (stop | pause | resume), and
+- `POST /ember {pass, id, action}` steers it (stop | pause | resume | close), and
   `POST /queue {pass, id, text}` is the "queue it or fly it" used for the
   messages.
 
@@ -218,6 +224,9 @@ stream and a stop button. The contract is at
   now). The thin bar under each shows how much of the window has elapsed.
 - **Box meter:** the tower machine's RAM, swap, and every ✻ claude process
   on it with its RSS (airport's turns and anything else), pushed every 10 s.
+  Hover or tap it for a card that also names the **biggest processes**, by
+  folder and script (a plane's own name when the folder is a plane's cwd), so
+  "mem 92%" comes with "… · server.js 1.8G".
 
 ## Quickstart (single machine, no auth)
 

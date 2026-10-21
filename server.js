@@ -543,11 +543,14 @@ function queueOrRun(id, text, fail) {
 function emberControl(id, action, cb) {
   const s = sess(id);
   if (!s || s.kind !== "ember") return cb({ ok: false, error: "not an ember tile" });
-  if (!["stop", "pause", "resume"].includes(action)) return cb({ ok: false, error: "action: stop|pause|resume" });
+  if (!["stop", "pause", "resume", "close"].includes(action)) return cb({ ok: false, error: "action: stop|pause|resume|close" });
+  emberPost(s.url, action, cb);
+}
+function emberPost(url, action, cb) {
   let done = false;
   const fin = (r) => { if (!done) { done = true; cb(r); } };
   try {
-    const req = emberRequest(s.url, { path: "control", ":method": "POST", "content-type": "application/json" });
+    const req = emberRequest(url, { path: "control", ":method": "POST", "content-type": "application/json" });
     let out = "";
     req.setEncoding("utf8");
     req.on("data", (d) => { out += d; });
@@ -557,10 +560,18 @@ function emberControl(id, action, cb) {
     req.end(JSON.stringify({ action }));
   } catch (e) { fin({ ok: false, error: e.message }); }
 }
-// watchers follow the doc: a tile added/removed/re-pointed starts/stops/restarts its watcher
+// watchers follow the doc: a tile added/removed/re-pointed starts/stops/restarts its watcher.
+// REMOVING a tile also sends its ember `close` (contract: nobody needs it any more → it stops and exits),
+// so finished embers don't linger holding memory. Not when another tile still shows the same URL.
 function emberSync() {
   const ss = doc[0].sessions || {};
-  for (const [id, w] of emberWatch) { const s = ss[id]; if (!s || s.kind !== "ember" || s.url !== w.url) emberStop(id); }
+  for (const [id, w] of emberWatch) {
+    const s = ss[id];
+    if (s && s.kind === "ember" && s.url === w.url) continue;
+    emberStop(id);
+    if (!s && !Object.values(ss).some((x) => x && x.kind === "ember" && x.url === w.url))
+      emberPost(w.url, "close", (r) => log("ember " + id + " removed → close: " + (r && r.ok ? "ok (" + (r.status || "") + ")" : (r && r.error) || "failed")));
+  }
   for (const [id, s] of Object.entries(ss))
     if (s && s.kind === "ember" && typeof s.url === "string" && s.url && !emberWatch.has(id)) emberStart(id, s.url);
 }
@@ -666,17 +677,25 @@ const { execFile } = require("child_process");
 function memSample(cb) {
   const mi = {};
   try { for (const l of fs.readFileSync("/proc/meminfo", "utf8").split("\n")) { const m = l.match(/^(\w+):\s+(\d+)/); if (m) mi[m[1]] = +m[2] * 1024; } } catch (_) {}
-  execFile("ps", ["-eo", "rss=,comm=,args="], { timeout: 5000, maxBuffer: 10e6 }, (err, out) => {
-    const procs = { claude: { n: 0, rss: 0 }, codex: { n: 0, rss: 0 } };
+  execFile("ps", ["-eo", "pid=,rss=,comm=,args="], { timeout: 5000, maxBuffer: 10e6 }, (err, out) => {
+    const procs = { claude: { n: 0, rss: 0 }, codex: { n: 0, rss: 0 } }, all = [];
     for (const l of String(out || "").split("\n")) {
-      const m = l.trim().match(/^(\d+)\s+(\S+)\s*(.*)$/); if (!m) continue;
-      const k = m[2] === "claude" || /claude-cli|\/bin\/claude(\s|$)/.test(m[3]) ? "claude"
-        : m[2] === "codex" || /\/codex(\s|$)/.test(m[3]) ? "codex" : null;
-      if (k) { procs[k].n++; procs[k].rss += +m[1] * 1024; }
+      const m = l.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/); if (!m) continue;
+      const k = m[3] === "claude" || /claude-cli|\/bin\/claude(\s|$)/.test(m[4]) ? "claude"
+        : m[3] === "codex" || /\/codex(\s|$)/.test(m[4]) ? "codex" : null;
+      if (k) { procs[k].n++; procs[k].rss += +m[2] * 1024; }
+      all.push({ pid: +m[1], rss: +m[2] * 1024, comm: m[3], args: m[4] });
     }
+    // the biggest processes, named by their folder + script ("report-v5 · server.js"): who's eating the box
+    const top = all.sort((a, b) => b.rss - a.rss).slice(0, 5).map((p) => {
+      let cwd = ""; try { cwd = fs.readlinkSync("/proc/" + p.pid + "/cwd"); } catch (_) {}
+      const script = (p.args.split(/\s+/).find((a) => /\.(c|m)?js$|\.py$/.test(a)) || "").split("/").pop();
+      const kind = p.comm === "claude" || /claude-cli|\/bin\/claude(\s|$)/.test(p.args) ? "claude" : p.comm;
+      return { pid: p.pid, rss: p.rss, comm: kind, script, cwd };
+    });
     cb({ type: "mem", at: Date.now(), host: process.env.AIRPORT_HOST_NAME || os.hostname().split(".")[0],
       total: mi.MemTotal || os.totalmem(), avail: mi.MemAvailable ?? os.freemem(),
-      swapTotal: mi.SwapTotal || 0, swapFree: mi.SwapFree || 0, load: os.loadavg(), cpus: os.cpus().length, procs });
+      swapTotal: mi.SwapTotal || 0, swapFree: mi.SwapFree || 0, load: os.loadavg(), cpus: os.cpus().length, procs, top });
   });
 }
 const browsers = () => [...clients].filter((c) => c._role === "browser" && c.readyState === 1);

@@ -993,7 +993,7 @@ function renderGauge(){
     clearTimeout(usageProbeT); usageProbeT = setTimeout(() => { usageProbeT = null; renderGauge(); }, 20000);
     renderGauge();
   });
-  if ($("gaugetip").classList.contains("on")) fillGaugeTip();  // live refresh while hovered
+  if ($("gaugetip").classList.contains("on") && tipFor === "gauge") fillGaugeTip();  // live refresh while hovered
 }
 
 // ---------- box meter: RAM · swap · ✻ claude processes ----------
@@ -1009,13 +1009,8 @@ function renderMem(d){
   const flying = Object.entries(sessions()).filter(([, s]) => s && s.running);
   const byHost = {}; for (const [, s] of flying) byHost[s.host || "?"] = (byHost[s.host || "?"] || 0) + 1;
   el.classList.toggle("stale", Date.now() - (d.at || 0) > 45_000);
-  el.title = `${d.host || "box"} memory (as of ${new Date(d.at).toLocaleTimeString()})\n` +
-    `RAM: ${fmtB(used)} used of ${fmtB(d.total)} (${pct}%) · ${fmtB(d.avail)} available\n` +
-    (d.swapTotal ? `swap: ${fmtB(sw)} of ${fmtB(d.swapTotal)} (${spct}%)\n` : "") +
-    `✻ claude processes on ${d.host || "box"}: ${cl.n} · ${fmtB(cl.rss)} RSS (airport turns + everything else)\n` +
-    (cx.n ? `☀ codex: ${cx.n} · ${fmtB(cx.rss)}\n` : "") +
-    `✈ airport turns flying: ${flying.length}${flying.length ? " (" + Object.entries(byHost).map(([h, n]) => h + " " + n).join(", ") + ")" : ""}\n` +
-    `load: ${(d.load || []).map((x) => x.toFixed(2)).join(" ")} on ${d.cpus} cpu`;
+  if ($("gaugetip").classList.contains("on") && tipFor === "mem") fillMemTip();   // live refresh while open
+  el.title = "";   // the hover/tap card (fillMemTip) has the details now
   el.innerHTML = `<span class="mgrid"><span class="lb${cls}">mem</span><span class="bar${cls}"><i style="width:${pct}%"></i></span><span class="v${cls}">${pct}%</span>` +
     (d.swapTotal ? `<span class="lb${scls} sw">swap</span><span class="bar${scls} sw"><i style="width:${spct}%"></i></span><span class="v${scls} sw">${spct}%</span>` : "") + `</span>` +
     `<span class="cl">✻${cl.n}</span><span class="rss">${fmtB(cl.rss)}</span>` +
@@ -1071,7 +1066,39 @@ function fillGaugeTip(){
   tip.style.right = Math.max(8, window.innerWidth - r.right - 4) + "px";
   tip.style.left = "auto";
 }
-function showGaugeTip(){ if (!Object.keys((doc[0] && doc[0].usage) || {}).length) return; fillGaugeTip(); $("gaugetip").classList.add("on"); }
+let tipFor = null;   // which meter the shared hover card (#gaugetip) is showing: "gauge" | "mem"
+function showGaugeTip(){ if (!Object.keys((doc[0] && doc[0].usage) || {}).length) return; tipFor = "gauge"; fillGaugeTip(); $("gaugetip").classList.add("on"); }
+// the memory card: RAM · swap · the biggest processes on the box, named by folder (a plane's own name when it's a plane's cwd)
+function fillMemTip(){
+  const d = memLast, tip = $("gaugetip");
+  if (!d || !d.total) return;
+  const used = d.total - d.avail, pct = Math.round(used / d.total * 100);
+  const sw = d.swapTotal ? d.swapTotal - d.swapFree : 0, spct = d.swapTotal ? Math.round(sw / d.swapTotal * 100) : 0;
+  const cls = (x) => x >= 90 ? "bad" : x >= 75 ? "warn" : "ok";
+  const pr = d.procs || {}, cl = pr.claude || { n: 0, rss: 0 };
+  const flying = Object.values(sessions()).filter((s) => s && s.running).length;
+  const label = (p) => {
+    const pl = p.cwd && Object.entries(sessions()).find(([, s]) => s && !s.kind && s.cwd && p.cwd.endsWith(String(s.cwd).replace(/^~/, "").replace(/\/+$/, "")));
+    const where = pl ? (pl[1].emoji ? pl[1].emoji + " " : "") + pl[0] : p.cwd ? p.cwd.split("/").pop() || "/" : "?";
+    return where + " · " + (p.comm === "claude" ? "claude" : p.script || p.comm);
+  };
+  tip.innerHTML = [
+    `<div class="acctrow">${esc(d.host || "box")} memory<span class="when">${esc(new Date(d.at).toLocaleTimeString())}</span></div>`,
+    `<div class="winrow"><span class="w">RAM</span><span class="${cls(pct)}">${tipBar(pct / 100)}</span> <span class="pct ${cls(pct)}">${pct}%</span> <span class="rst">${fmtB(used)} of ${fmtB(d.total)}</span></div>`,
+    d.swapTotal ? `<div class="winrow"><span class="w">swap</span><span class="${cls(spct)}">${tipBar(spct / 100)}</span> <span class="pct ${cls(spct)}">${spct}%</span> <span class="rst">${fmtB(sw)} of ${fmtB(d.swapTotal)}</span></div>` : "",
+    (d.top || []).length ? `<hr><div class="acctrow">biggest processes</div>` + d.top.map((p) =>
+      `<div class="winrow"><span class="pct ${cls(p.rss / d.total * 400)}">${fmtB(p.rss)}</span> <span title="pid ${p.pid}${p.cwd ? " · " + esc(p.cwd) : ""}">${esc(label(p))}</span></div>`).join("") : "",
+    `<hr><div class="meta">✻ claude ${cl.n} · ${fmtB(cl.rss)} · ✈ flying ${flying} · load ${(d.load || []).map((x) => x.toFixed(1)).join(" ")} on ${d.cpus} cpu</div>`,
+  ].join("");
+  const r = $("mem").getBoundingClientRect();
+  tip.style.top = (r.bottom + 6) + "px";
+  tip.style.right = Math.max(8, window.innerWidth - r.right - 4) + "px";
+  tip.style.left = "auto";
+}
+function showMemTip(){ if (!memLast) return; tipFor = "mem"; fillMemTip(); $("gaugetip").classList.add("on"); }
+$("mem").addEventListener("mouseenter", showMemTip);
+$("mem").addEventListener("mouseleave", hideGaugeTip);
+$("mem").addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") && tipFor === "mem" ? hideGaugeTip() : showMemTip(); });  // touch
 function hideGaugeTip(){ $("gaugetip").classList.remove("on"); }
 $("gauge").addEventListener("mouseenter", showGaugeTip);
 $("gauge").addEventListener("mouseleave", hideGaugeTip);
@@ -1781,8 +1808,8 @@ function renderEmberHead(s){
     ${!final && ctl.has("resume") && (em.status === "paused" || em.status === "starting") ? btn("resume", "▶", "resume") : ""}
     ${!final && ctl.has("stop") && em.status !== "stopping" ? `<button class="danger" data-emact="stop" title="stop the work">■ stop</button>` : ""}
     <a href="${esc(s.url || "#")}" target="_blank" rel="noreferrer" title="${esc(bare)}">↗</a>
-    ${emberConfirm ? `<button class="danger" id="eh-delgo" title="the ember itself keeps running">remove tile</button><button id="eh-delx">×</button>`
-      : `<button id="eh-delc" title="remove this tile from the tarmac (the ember keeps running)">✕</button>`}`;
+    ${emberConfirm ? `<button class="danger" id="eh-delgo" title="removing the tile sends the ember close: it stops if it's still running, then shuts down (its files stay)">${final ? "close + remove" : "■ stop + remove"}</button><button id="eh-delx">×</button>`
+      : `<button id="eh-delc" title="remove this tile and close the ember (it stops, if running, and shuts down)">✕</button>`}`;
   const h = $("emberhead");
   if (h._html === html) return;
   h._html = html; h.innerHTML = html;
