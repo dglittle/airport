@@ -83,12 +83,24 @@
     -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent;
     transition:border-color .2s, box-shadow .2s;
   }
-  .plane.note{ --ring:repeating-conic-gradient(rgba(143,165,192,.7) 0 6deg,transparent 0 13deg); }
-  /* 📝 a note shows its own text, tiny, like a sticky note (sized to the tile: cqw); fades where it overflows */
-  .plane > .ntext{ position:absolute; inset:8% 9%; overflow:hidden; text-align:left; pointer-events:none;
-    font:500 max(4px,7.2cqw)/1.28 -apple-system,system-ui,sans-serif; color:var(--ink); opacity:.82;
+  /* 📝 a note is a manila card: blue rules, a red margin line, its own text written ON the rules. No ring
+     (a note has no time to show). One line = --lh, in cqw like the text, so rules and text stay locked at
+     any tile size: the rules are a one-line-tall tile repeated down the card, offset to sit under each
+     baseline. The card is a .paper child so the selection outline, unread dot and drag shadow stay on .plane. */
+  .plane.note{ --lh:10.5cqw; border-width:0; background:none; border-radius:5%; padding:0;
+    box-shadow:0 calc(var(--S)*.004) calc(var(--S)*.012) rgba(0,0,0,.55); }
+  .plane.note.dragging{ box-shadow:0 calc(var(--S)*.02) calc(var(--S)*.05) rgba(0,0,0,.7); }
+  .plane > .paper{ position:absolute; inset:0; border-radius:inherit; pointer-events:none; background:
+      linear-gradient(170deg,rgba(255,255,255,.14),rgba(120,80,20,.10)),                      /* light falloff */
+      linear-gradient(90deg,transparent 13.4%,rgba(205,60,55,.62) 13.4% 14.6%,transparent 0),  /* red margin */
+      linear-gradient(transparent calc(100% - max(.6px,1cqw)),rgba(60,105,190,.55) 0)           /* one blue rule */
+        0 6.6cqw / 100% var(--lh) repeat-y,
+      #e4cf98; }                                                                                /* manila */
+  .plane .paper > .ntext{ position:absolute; inset:8cqw 6cqw 4cqw 18cqw; overflow:hidden; text-align:left;
+    font:600 max(4px,7.2cqw)/var(--lh) -apple-system,system-ui,sans-serif; color:#2d2617;
     white-space:pre-wrap; overflow-wrap:anywhere;
-    -webkit-mask-image:linear-gradient(#000 72%,transparent); mask-image:linear-gradient(#000 72%,transparent); }
+    -webkit-mask-image:linear-gradient(#000 78%,transparent); mask-image:linear-gradient(#000 78%,transparent); }
+  .plane .ntext .h{ color:#7a2416; }   /* a short first line with more below = the card's heading */
   /* 🔥 ember tiles: long-running work with a URL; the tower stamps s.em from the ember's /state */
   .plane.ember{ --ring:conic-gradient(#e07a2c calc(var(--e,0)*1turn),rgba(224,122,44,.22) 0); }
   .plane.ember.live{ box-shadow:0 0 calc(var(--S)*0.03) rgba(224,122,44,.35); }
@@ -1222,7 +1234,7 @@ function renderTarmac(){
       const html = `
         ${isUnread(s) ? '<div class="unread"></div>' : ""}${wake ? `<div class="wake">${s.pumpText && String(s.pumpText).trim() ? "⛽" : "⏰"}</div>` : ""}
         ${isEmber && s.frame && s.url ? `<div class="eframe"><iframe src="${esc(s.url)}" tabindex="-1" scrolling="no" referrerpolicy="no-referrer" title="${esc(name)}"></iframe></div>`
-        : isNote && String(s.text || "").trim() ? `<div class="ntext">${esc(String(s.text).replace(/^\s*\n/, "").slice(0, 600))}</div>`
+        : isNote ? `<div class="paper"><div class="ntext">${noteHTML(s.text)}</div></div>`
         : `<div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>`}
         <div class="cap"><div class="name">${esc(name)}</div></div>${qn ? `<div class="qn" title="${esc(s.queueWait || "queued — flies as the next turn")}">⏭${qn}</div>` : ""}`;
       if (el._html !== html) { el._html = html; el.innerHTML = html; }  // untouched tiles keep their <img> (no flicker)
@@ -1230,6 +1242,12 @@ function renderTarmac(){
     }
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
+}
+// 📝 the text a note card shows: a short first line with more below becomes its heading (a leading # is dropped)
+function noteHTML(text){
+  const t = String(text || "").replace(/^\s*\n/, "").replace(/\s+$/, "").slice(0, 600);
+  const i = t.indexOf("\n"), first = i < 0 ? t : t.slice(0, i);
+  return i > 0 && first.trim().length <= 48 ? `<b class="h">${esc(first.replace(/^\s*#+\s*/, ""))}</b>${esc(t.slice(i))}` : esc(t);
 }
 function fmtWake(ms){ const m = Math.max(1, Math.ceil(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? m % 60 + "m" : "") : m + "m"; }
 function clampX(x){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, x)); }
