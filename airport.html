@@ -30,7 +30,7 @@
   }
   /* title never truncates: it takes its natural width and WRAPS if it must;
      the sub line only gets what's left (basis 0), wrapping to ≤3 lines */
-  header b{ font-size:14px; line-height:1.2; flex:0 1 auto; min-width:0; white-space:normal; overflow-wrap:anywhere; }
+  header b{ font-size:14px; line-height:1.2; flex:0 1 auto; min-width:min(7em, 30vw); white-space:normal; overflow-wrap:break-word; }
   header .sub{ color:var(--dim); font-size:10px; line-height:1.25; font-family:ui-monospace,Menlo,monospace; flex:1 1 0; min-width:70px;
     white-space:normal; overflow-wrap:anywhere; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
   /* ‹ back: a bigger glyph (wider, not taller: the header row keeps its height), plus an invisible
@@ -579,6 +579,13 @@
   .hintline{ color:var(--dim); font-size:10px; text-align:center; margin-top:6px; font-family:ui-monospace,Menlo,monospace; min-height:12px; }
   /* phones, cramped on purpose: row 1 = ‹ title · status · buttons; row 2 = the sub line
      (≤3 tiny lines) on the left, the dashboard (mem/swap stacked like the dials) on the right */
+  /* too narrow for one row (fitHeader decides, by measuring): the phone's two-row layout at normal sizes;
+     row 1 = ‹ title · status · buttons, row 2 = the sub line + the dials. Never a squeezed, letter-per-line title. */
+  header.tworow{ flex-wrap:wrap; row-gap:2px; }
+  header.tworow .stat{ margin-left:auto; }
+  header.tworow .hbreak{ display:block; order:9; flex:0 0 100%; height:0; }
+  header.tworow .sub{ order:10; flex:1 1 0; min-width:0; }
+  header.tworow #dash{ order:11; flex:0 0 auto; margin-left:0; }
   @media (max-width:600px){
     header{ flex-wrap:wrap; row-gap:1px; column-gap:5px; padding:3px 6px 2px; }
     header button{ padding:1px 6px; font-size:12px; border-radius:6px; }
@@ -2573,6 +2580,28 @@ function stopMode(why){
   dmStop();
 }
 function stopModeSafe(){ try { stopMode("left session"); } catch (_) {} }
+
+// ---------- the header: one row if everything fits, else two (phones always use two, via CSS) ----------
+// Measured, not guessed: the dials, buttons and title vary. Remove .tworow, see if the row overflows (or the
+// title is pinched to its minimum), and put it back if so — all before the next paint, so nothing flickers.
+// Stable: the dials tick every few seconds, so only a new window width or a new title may bring it back to one
+// row; a tick can only push it to two (no flapping between layouts).
+let fitKey = "";
+function fitHeader(){
+  const h = $("hdr"), t = $("hdr-title");
+  if (innerWidth <= 600) { h.classList.remove("tworow"); fitKey = ""; return; }
+  const key = innerWidth + "|" + t.textContent;
+  if (h.classList.contains("tworow") && key === fitKey) return;   // already two rows for this width + title
+  fitKey = key;
+  h.classList.remove("tworow");
+  const r = t.getBoundingClientRect();
+  h.classList.toggle("tworow", h.scrollWidth > h.clientWidth + 1 || r.height > r.width * 1.5);
+}
+let fitHeaderQ = 0;
+const fitHeaderSoon = () => { if (!fitHeaderQ) fitHeaderQ = requestAnimationFrame(() => { fitHeaderQ = 0; fitHeader(); }); };
+new MutationObserver(fitHeaderSoon).observe($("hdr"), { childList: true, subtree: true, characterData: true });
+window.addEventListener("resize", fitHeaderSoon);
+fitHeaderSoon();
 
 // ---------- 🎙 dictation: a full-screen view (the dictation sub-flight's design, ported Oct-22) ----------
 // One button in the composer opens it and starts recording. The phone cuts a chunk at each pause (voice
