@@ -18,7 +18,7 @@
 //         POST /wake        {pass?, id} → fire one ⏰ timer wake now (see wakeTick)
 //         POST /queue       {pass?, id, text} → ⏭ queue a message if flying, else fly it now
 //         POST /ember       {pass?, id, action} → stop|pause|resume a 🔥 ember tile (see ember tiles)
-//         POST /whisper?pass= raw audio → OpenAI whisper transcription
+//         POST /whisper?pass= raw audio → OpenAI transcription (gpt-4o-mini-transcribe + the tarmac's vocabulary)
 //   WS    browsers + host daemons connect, auth, receive the doc, exchange
 //         deltas; run/interrupt/fs are routed to the owning host's socket.
 //
@@ -710,17 +710,39 @@ setInterval(() => pushMem(), 10_000).unref();
 function openaiKey() {
   return process.env.OPENAI_API_KEY || null; // env or ~/.airport/.env (loaded above)
 }
-function whisper(body, contentType, cb) {
+// ☁︎ transcription. Default model: gpt-4o-mini-transcribe (about half whisper-1's price, and better);
+// AIRPORT_TRANSCRIBE_MODEL overrides. A `prompt` carries the airport's vocabulary (the owner's name plus every
+// plane's id and title), so names like "pr209" come out spelled the way the tarmac spells them. If the
+// model refuses a clip (format, size), it retries once on whisper-1.
+const TRANSCRIBE_MODEL = process.env.AIRPORT_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+function transcribeVocab() {
+  // the transcribers only read the first ~224 tokens of a prompt: owner, then plane ids, then titles, ≤ ~520 chars
+  const ss = Object.entries(doc[0].sessions || {}).filter(([, s]) => s);
+  const words = new Set();
+  if (process.env.AIRPORT_OWNER) words.add(process.env.AIRPORT_OWNER);
+  for (const [id] of ss) words.add(id);
+  for (const [id, s] of ss) {
+    const t = String(s.title || (s.em && s.em.title) || "").replace(/[^\p{L}\p{N} #+._-]/gu, " ").replace(/\s+/g, " ").trim();
+    if (t && t.toLowerCase() !== id) words.add(t.slice(0, 40));
+  }
+  let out = "Vocabulary: ";
+  for (const w of words) { if (out.length + w.length > 520) break; out += w + ", "; }
+  return out.replace(/, $/, ".");
+}
+function whisper(body, contentType, cb, model) {
   const key = openaiKey();
   if (!key) return cb({ status: 501, error: "no OPENAI_API_KEY (env or ~/.airport/.env)" });
+  model = model || TRANSCRIBE_MODEL;
   const boundary = "----airport" + crypto.randomBytes(8).toString("hex");
-  const ext = /mp4/.test(contentType) ? "mp4" : /ogg/.test(contentType) ? "ogg" : "webm";
-  const pre = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n` +
+  const ct = String(contentType || "audio/webm");
+  const ext = /mp4|m4a/.test(ct) ? "mp4" : /ogg/.test(ct) ? "ogg" : /mpeg|mp3/.test(ct) ? "mp3" : /wav/.test(ct) ? "wav" : "webm";
+  const field = (name, value) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`;
+  const pre = Buffer.from(field("model", model) + field("prompt", transcribeVocab()) +
     `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.${ext}"\r\n` +
-    `Content-Type: ${contentType || "audio/webm"}\r\n\r\n`);
+    `Content-Type: ${ct}\r\n\r\n`);
   const post = Buffer.from(`\r\n--${boundary}--\r\n`);
   const payload = Buffer.concat([pre, body, post]);
+  const t0 = Date.now();
   const req = https.request({
     hostname: "api.openai.com", path: "/v1/audio/transcriptions", method: "POST",
     headers: { Authorization: "Bearer " + key, "Content-Type": "multipart/form-data; boundary=" + boundary, "Content-Length": payload.length },
@@ -728,11 +750,11 @@ function whisper(body, contentType, cb) {
     let out = "";
     res.on("data", (d) => (out += d));
     res.on("end", () => {
-      try {
-        const j = JSON.parse(out);
-        if (j.text != null) cb({ status: 200, text: j.text });
-        else cb({ status: 502, error: j.error?.message || out.slice(0, 200) });
-      } catch (_) { cb({ status: 502, error: out.slice(0, 200) }); }
+      let j = null; try { j = JSON.parse(out); } catch (_) {}
+      if (j && j.text != null) { log(`☁︎ ${model}: ${body.length} B → ${j.text.length} chars in ${Date.now() - t0} ms`); return cb({ status: 200, text: j.text, model }); }
+      const err = (j && j.error && j.error.message) || out.slice(0, 200);
+      if (model !== "whisper-1") { log(`☁︎ ${model} refused (${err.slice(0, 120)}) → whisper-1`); return whisper(body, contentType, cb, "whisper-1"); }
+      cb({ status: 502, error: err });
     });
   });
   req.on("error", (e) => cb({ status: 502, error: e.message }));
@@ -795,7 +817,7 @@ const handler = (req, res) => {
       if (url.pathname === "/whisper") {
         if (!okPass(url.searchParams.get("pass"))) return json(res, 403, { ok: false });
         return whisper(body, req.headers["content-type"] || "audio/webm", (r) =>
-          json(res, r.status, r.status === 200 ? { ok: true, text: r.text } : { ok: false, error: r.error }));
+          json(res, r.status, r.status === 200 ? { ok: true, text: r.text, model: r.model } : { ok: false, error: r.error }));
       }
       let j = {};
       try { j = JSON.parse(body.toString("utf8") || "{}"); } catch (_) { return json(res, 400, { ok: false, error: "bad json" }); }

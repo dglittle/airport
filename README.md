@@ -297,6 +297,7 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | `AIRPORT_TURN_TIMEOUT_MS` | daemon | `0` *(no limit)* | optional per-turn kill switch; ◼ stop is the manual brake |
 | `AIRPORT_STATE_DIR` | both | `~/.airport` | `.env`, token state |
 | `OPENAI_API_KEY` | tower | *(unset)* | enables ☁︎ whisper transcription |
+| `AIRPORT_TRANSCRIBE_MODEL` | tower | `gpt-4o-mini-transcribe` | the ☁︎ transcription model. The tarmac's vocabulary (owner + plane ids + titles) rides along as its prompt; on a refusal it retries on `whisper-1` |
 | `AIRPORT_OWNER` | tower | *(unset)* | your name, for the 🧭 briefing ("the user" if unset) |
 | `AIRPORT_URL` | tarmac.js | `http://localhost:<port>` | the tower's URL (set it when the tower runs TLS on a real hostname) |
 
