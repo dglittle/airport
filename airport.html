@@ -9,7 +9,7 @@
   :root{
     --bg:#0b1220; --bg2:#0e1729; --panel:#141f33; --panel2:#1b2a44; --rule:#26385a;
     --ink:#e3ecf7; --muted:#8fa5c0; --dim:#54688a;
-    --hot:#4fe3a8; --run:#ffc46b; --bad:#ff6b5e; --accent:#e8a13c; --new:#b78cff;
+    --hot:#4fe3a8; --run:#ffc46b; --bad:#ff6b5e; --accent:#e8a13c; --new:#b78cff; --tmr:#6aa8ff;
     --you:#4aa3ff; --ai:#e8a13c; --tool:#54688a;
   }
   *{box-sizing:border-box}
@@ -123,6 +123,24 @@
     width:calc(var(--S)*0.03); height:calc(var(--S)*0.03); border-radius:50%;
     background:var(--new); border:calc(var(--S)*0.005) solid var(--bg); box-shadow:0 0 calc(var(--S)*0.025) rgba(183,140,255,.7);
   }
+  /* ⏰ wake timer: a clock pip in the top-left corner (mirror of unread). Its blue rim drains toward the
+     next wake (--wt); it wiggles in the last 2 min, goes solid and rings when due, and is hatched + slashed
+     while the tower is holding it (wakeWait: flying, airfield down/at cap, usage over the gate). ⛽ = pump plane. */
+  .plane .wake{
+    position:absolute; z-index:2; top:calc(var(--S)*-0.012); left:calc(var(--S)*-0.012);
+    width:max(15px,calc(var(--S)*0.0375)); aspect-ratio:1; border-radius:50%;
+    border:max(1.5px,calc(var(--S)*0.0044)) solid var(--bg);
+    background:radial-gradient(circle,var(--panel2) 55%,transparent 56%),conic-gradient(var(--tmr) calc(var(--wt,0)*1turn),rgba(106,168,255,.22) 0);
+    display:grid; place-items:center; font-size:max(7.5px,calc(var(--S)*0.017)); line-height:1; pointer-events:none;
+  }
+  .plane[data-wake=soon] .wake{ animation:wakewiggle .45s ease-in-out infinite; box-shadow:0 0 calc(var(--S)*0.019) var(--tmr); }
+  .plane[data-wake=due] .wake{ background:radial-gradient(circle,#fff 0 30%,var(--tmr) 31%); animation:wakewiggle .2s linear infinite,wakeflash 1s infinite; }
+  .plane[data-wake=wait] .wake{ background:radial-gradient(circle,var(--panel2) 55%,transparent 56%),repeating-conic-gradient(var(--muted) 0 18deg,transparent 0 36deg); filter:grayscale(1); }
+  .plane[data-wake=wait] .wake::after{ content:""; position:absolute; inset:-1px; border-radius:50%;
+    background:linear-gradient(135deg,transparent 45%,var(--muted) 45% 57%,transparent 57%); }
+  @keyframes wakewiggle{ 0%,100%{transform:rotate(0)} 25%{transform:rotate(-14deg)} 75%{transform:rotate(14deg)} }
+  @keyframes wakeflash{ 0%,100%{box-shadow:0 0 0 0 rgba(106,168,255,0)} 50%{box-shadow:0 0 calc(var(--S)*0.035) calc(var(--S)*0.005) rgba(106,168,255,.85)} }
+  @media (prefers-reduced-motion:reduce){ .plane .wake{ animation:none !important; } }
   .plane .emoji{ font-size:calc(var(--S)*0.048); line-height:1.15; position:relative; }
   /* a plane image replaces the emoji glyph (the emoji stays as the fallback if it 404s) */
   .plane .emoji img.picon{ display:block; width:calc(var(--S)*0.052); height:calc(var(--S)*0.052); border-radius:22%;
@@ -1174,6 +1192,12 @@ function renderTarmac(){
     el.style.setProperty("--f", s.running ? ((now - (s.startedAt || now)) % 600000) / 600000 : 0);
     el.style.setProperty("--h", isHot(s) ? Math.max(0, Math.min(1, (s.hotUntil - now) / Math.max(1, s.hotUntil - s.lastRunEndedAt))) : 1);
     el.style.setProperty("--e", isEmber ? (em.total ? Math.min(1, (em.done || 0) / em.total) : 1) : 0);
+    // ⏰ wake timer badge: --wt = what's left of the interval; data-wake = count | soon (≤2 min) | due | wait (blocked)
+    const wEvery = isTile ? 0 : Number(s.wakeEvery) || 0;
+    const wLeft = wEvery >= 5 ? (Number(s.lastWakeAt) || 0) + wEvery * 60000 - now : 0;
+    const wake = wEvery < 5 ? "" : s.wakeWait ? "wait" : wLeft <= 0 ? "due" : wLeft <= 120000 ? "soon" : "count";
+    if (wake) el.dataset.wake = wake; else delete el.dataset.wake;
+    el.style.setProperty("--wt", wake ? Math.max(0, Math.min(1, wLeft / (wEvery * 60000))) : 0);
     if (!(dragState && dragState.group.has(id))) {
       const x = clampX(typeof s.x === "number" ? s.x : 0.5);
       const y = clampY(typeof s.y === "number" ? s.y : 0.5);
@@ -1192,9 +1216,11 @@ function renderTarmac(){
         ? ["ember", emSt, em.total ? (em.done || 0) + "/" + em.total : em.done || "", em.ended ? ago(em.ended) : "", em.msg || ""]
         : isNote ? ["note", s.editedAt ? ago(s.editedAt) : "new"]
         : [s.host || "?", off ? "host down" : s.state === "offline" ? "offline" : "", tokTxt, s.running ? "" : fmtTok(s.totalTokens), meta, !s.running && isHot(s) ? "hot" : "",
-           qn ? `⏭${qn} queued` : "", isUnread(s) ? "unread" : ""]).filter(Boolean).join(" · ");
+           qn ? `⏭${qn} queued` : "", isUnread(s) ? "unread" : "",
+           wake === "wait" ? String(s.wakeWait) : wake === "due" ? `⏰ wake due (every ${wEvery}m)`
+           : wake ? `⏰ every ${wEvery}m · next in ${fmtWake(wLeft)}` : ""]).filter(Boolean).join(" · ");
       const html = `
-        ${isUnread(s) ? '<div class="unread"></div>' : ""}
+        ${isUnread(s) ? '<div class="unread"></div>' : ""}${wake ? `<div class="wake">${s.pumpText && String(s.pumpText).trim() ? "⛽" : "⏰"}</div>` : ""}
         ${isEmber && s.frame && s.url ? `<div class="eframe"><iframe src="${esc(s.url)}" tabindex="-1" scrolling="no" referrerpolicy="no-referrer" title="${esc(name)}"></iframe></div>`
         : isNote && String(s.text || "").trim() ? `<div class="ntext">${esc(String(s.text).replace(/^\s*\n/, "").slice(0, 600))}</div>`
         : `<div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>`}
@@ -1205,6 +1231,7 @@ function renderTarmac(){
   }
   for (const el of [...apron.querySelectorAll(".plane")]) if (!seen.has(el.dataset.id)) el.remove();
 }
+function fmtWake(ms){ const m = Math.max(1, Math.ceil(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? m % 60 + "m" : "") : m + "m"; }
 function clampX(x){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015, x)); }
 function clampY(y){ return Math.max(DISC/2 + 0.015, Math.min(1 - DISC/2 - 0.015 - NAME_H(), y)); }
 // the name line under each tile, as a fraction of the apron (≥10px text on small aprons)
