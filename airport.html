@@ -1648,7 +1648,20 @@ function mdHtml(src){
   const out = [];
   let para = [], list = null, quote = [], table = [];
   const flushP = () => { if (para.length) { out.push(`<p>${para.map(mdInline).join("<br>")}</p>`); para = []; } };
-  const flushL = () => { if (list) { out.push(`<${list.tag}>` + list.items.map(i => `<li>${mdInline(i)}</li>`).join("") + `</${list.tag}>`); list = null; } };
+  // list = { tag, start, items:[{ text, sub:{tag, items:[]} | null }] } — indented items nest one level under
+  // the previous item; ol keeps its first number (start=) so "1. … bullets … 2." doesn't restart at 1
+  const liHtml = (i) => `<li>${mdInline(i.text)}${i.sub ? `<${i.sub.tag}>${i.sub.items.map(t => `<li>${mdInline(t)}</li>`).join("")}</${i.sub.tag}>` : ""}</li>`;
+  const flushL = () => { if (list) { out.push(`<${list.tag}${list.start > 1 ? ` start="${list.start}"` : ""}>` + list.items.map(liHtml).join("") + `</${list.tag}>`); list = null; } };
+  const listItem = (indent, tag, num, text) => {
+    flushP(); flushQ(); flushT();
+    if (indent >= 2 && list && list.items.length) {
+      const last = list.items[list.items.length - 1];
+      if (!last.sub || last.sub.tag !== tag) last.sub = { tag, items: [] };
+      last.sub.items.push(text); return;
+    }
+    if (!list || list.tag !== tag) { flushL(); list = { tag, start: num || 1, items: [] }; }
+    list.items.push({ text, sub: null });
+  };
   const flushQ = () => { if (quote.length) { out.push(`<blockquote>${quote.map(mdInline).join("<br>")}</blockquote>`); quote = []; } };
   const flushT = () => {
     if (table.length < 2) { para.push(...table); table = []; return; }
@@ -1661,13 +1674,13 @@ function mdHtml(src){
   for (const ln of lines) {
     let m;
     if (/^\x00\d+\x00\s*$/.test(ln)) { flushAll(); out.push(ln.trim()); continue; }
-    if (/^\s*$/.test(ln)) { flushAll(); continue; }
+    if (/^\s*$/.test(ln)) { flushP(); flushQ(); flushT(); continue; }  // a list survives blank lines; the next non-list line closes it
     if ((m = ln.match(/^(#{1,6}) +(.+)/))) { flushAll(); const n = Math.min(m[1].length, 4); out.push(`<h${n}>${mdInline(m[2])}</h${n}>`); continue; }
     if (/^ {0,3}(---+|\*\*\*+)\s*$/.test(ln)) { flushAll(); out.push("<hr>"); continue; }
     if ((m = ln.match(/^ {0,3}&gt; ?(.*)/))) { flushP(); flushL(); flushT(); quote.push(m[1]); continue; }
     if (/^\s*\|.*\|\s*$/.test(ln)) { flushP(); flushL(); flushQ(); table.push(ln); continue; }
-    if ((m = ln.match(/^\s*[-*+] +(.+)/))) { flushP(); flushQ(); flushT(); if (!list || list.tag !== "ul") { flushL(); list = { tag:"ul", items:[] }; } list.items.push(m[1]); continue; }
-    if ((m = ln.match(/^\s*\d+[.)] +(.+)/))) { flushP(); flushQ(); flushT(); if (!list || list.tag !== "ol") { flushL(); list = { tag:"ol", items:[] }; } list.items.push(m[1]); continue; }
+    if ((m = ln.match(/^(\s*)[-*+] +(.+)/))) { listItem(m[1].length, "ul", 0, m[2]); continue; }
+    if ((m = ln.match(/^(\s*)(\d+)[.)] +(.+)/))) { listItem(m[1].length, "ol", +m[2], m[3]); continue; }
     flushL(); flushQ(); flushT(); para.push(ln);
   }
   flushAll();
