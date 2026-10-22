@@ -594,6 +594,75 @@
     #mem .bar{ width:26px; }
     #mem .rss{ display:none; }
   }
+  /* ---------- 🎙 dictation: a full-screen view (rolling chunks × several engines, merged with the vocabulary) ---------- */
+  #dict{ --dbg:#0b0e12; --dpanel:#131920; --dline:#243041; --dink:#e6edf3; --ddim:#8593a3;
+    --drun:#f0b429; --dok:#3fb950; --dbad:#f85149; --dacc:#58a6ff;
+    position:fixed; inset:0; z-index:400; display:none; flex-direction:column; height:100dvh; background:var(--dbg); color:var(--dink);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  #dict.on{ display:flex; }
+  #dict *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  #dict .dk-h{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--dline); background:#0e1318; }
+  #dict .dk-h .dk-t{ font-weight:700; white-space:nowrap; max-width:40%; overflow:hidden; text-overflow:ellipsis; }
+  #dict .dk-h .dk-stat{ flex:1; font-size:12px; color:var(--ddim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #dict .dk-h button{ background:none; border:1px solid var(--dline); color:var(--dink); border-radius:8px; padding:4px 9px; font-size:15px; }
+  #dict .rec{ color:var(--dbad); font-weight:700; }
+  #dk-meter{ height:4px; background:#1a2129; flex:0 0 auto; }
+  #dk-meter i{ display:block; height:100%; width:0; background:var(--dacc); transition:width .06s; }
+  #dk-meter.speech i{ background:var(--dok); }
+  #dk-list{ flex:1; overflow-y:auto; padding:8px 8px 20px; display:flex; flex-direction:column; gap:10px; }
+  #dict .empty{ color:var(--ddim); text-align:center; margin:auto; padding:20px; font-size:14px; }
+  #dict .chunk{ background:var(--dpanel); border:1px solid var(--dline); border-radius:14px; padding:8px 10px; }
+  #dict .chunk.recording{ border-color:var(--dbad); }
+  #dict .chunk.err{ border-color:var(--dbad); }
+  #dict .ch{ display:flex; gap:8px; align-items:center; font-size:11px; color:var(--ddim); }
+  #dict .ch .sp{ flex:1; }
+  #dict .ch .src{ color:var(--dok); }
+  #dict .ch button{ font-size:11px; background:#1d2633; color:var(--dink); border:1px solid var(--dline); border-radius:6px; padding:2px 7px; }
+  #dict .main{ font-size:18px; line-height:1.4; margin:4px 0 6px; outline:none; word-wrap:break-word; min-height:1.4em; }
+  #dict .main.editing{ background:#0b1016; border-radius:6px; padding:2px 4px; box-shadow:0 0 0 1px var(--dacc); }
+  #dict .main .w{ border-radius:3px; }
+  #dict .main .lo{ background:rgba(248,81,73,.22); border-bottom:1px dashed var(--dbad); }
+  #dict .main .md{ background:rgba(240,180,41,.16); border-bottom:1px dashed var(--drun); }
+  #dict .interim{ color:var(--ddim); font-style:italic; }
+  #dict .vers{ display:flex; flex-direction:column; gap:3px; }
+  #dict .v{ display:flex; gap:6px; align-items:baseline; font-size:13px; padding:4px 6px; border-radius:8px; background:#0f141b; border:1px solid transparent; }
+  #dict .v.on{ border-color:var(--dok); }
+  #dict .v .lab{ flex:0 0 58px; font-size:10px; color:var(--ddim); text-transform:uppercase; letter-spacing:.03em; }
+  #dict .v .tx{ flex:1; min-width:0; color:#c9d4df; }
+  #dict .v .ms{ flex:0 0 auto; font-size:10px; color:var(--ddim); font-variant-numeric:tabular-nums; }
+  #dict .v .tx .dw{ background:rgba(188,140,255,.25); color:#e3d2ff; border-radius:3px; }
+  #dict .v.pending .tx{ color:var(--ddim); font-style:italic; }
+  #dict .v.bad .tx{ color:#ff9c8a; }
+  #dict .chunk.collapsed .vers{ display:none; }
+  #dict .dk-f{ display:flex; gap:8px; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); border-top:1px solid var(--dline); background:#0e1318; }
+  #dict .dk-f button{ flex:1; border:1px solid var(--dline); border-radius:14px; background:#18202a; color:var(--dink); font-size:15px; font-weight:600; padding:14px 6px; }
+  #dk-mic{ flex:2 !important; font-size:18px !important; background:linear-gradient(180deg,#1f6f35,#134422) !important; border-color:var(--dok) !important; }
+  #dk-mic.on{ background:linear-gradient(180deg,#7a2219,#3a0f0c) !important; border-color:var(--dbad) !important; }
+  #dk-send{ background:linear-gradient(180deg,#3a2c12,#22190a) !important; border-color:#e8a13c !important; }
+  #dict .dk-sheet{ position:fixed; inset:0; background:#000a; display:none; z-index:410; }
+  #dict .dk-sheet.on{ display:flex; align-items:flex-end; }
+  #dict .dk-sheet > div{ background:var(--dpanel); border-top:1px solid var(--dline); border-radius:16px 16px 0 0; width:100%; max-height:88dvh; overflow:auto; padding:14px 14px calc(14px + env(safe-area-inset-bottom)); }
+  #dict .dk-sheet h3{ margin:4px 0 8px; }
+  #dict .dk-sheet label{ display:flex; align-items:center; gap:8px; padding:6px 0; font-size:14px; }
+  #dict .dk-sheet label small{ color:var(--ddim); margin-left:auto; }
+  #dict .dk-sheet textarea{ width:100%; background:#0b1016; color:var(--dink); border:1px solid var(--dline); border-radius:8px; padding:8px; font:inherit; font-size:14px; min-height:120px; }
+  #dict .dk-sheet .row{ display:flex; gap:8px; margin-top:10px; }
+  #dict .dk-sheet .row button{ flex:1; padding:12px; border-radius:12px; border:1px solid var(--dline); background:#18202a; color:var(--dink); font-weight:600; font-size:15px; }
+  #dict .dk-sheet .row button.go{ background:linear-gradient(180deg,#1f6f35,#134422); border-color:var(--dok); }
+  #dict .note{ font-size:12px; color:var(--ddim); margin:6px 0; }
+  #dk-pop{ position:fixed; left:10px; right:10px; background:#1b2430; border:1px solid var(--dacc); border-radius:12px; padding:6px; z-index:420; box-shadow:0 8px 24px #000c; display:none; }
+  #dk-pop.on{ display:block; }
+  #dk-pop div{ padding:10px; border-radius:8px; display:flex; justify-content:space-between; gap:10px; font-size:16px; }
+  #dk-pop div:active{ background:#26344a; }
+  #dk-pop small{ color:var(--ddim); font-size:11px; align-self:center; text-align:right; }
+  #dk-toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:90px; background:#222c38; border:1px solid var(--dline); padding:8px 14px; border-radius:10px; font-size:13px; display:none; z-index:430; max-width:90vw; }
+  @media (orientation:landscape) and (min-width:560px){   /* landscape: the engines sit side by side */
+    #dict .vers{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:5px; }
+    #dict .v{ flex-direction:column; align-items:stretch; }
+    #dict .v .lab{ flex:none; display:flex; justify-content:space-between; }
+    #dict .main{ font-size:17px; }
+  }
 </style>
 </head>
 <body>
@@ -611,6 +680,44 @@
     <button id="gear">⚙</button>
   </header>
   <div id="gaugetip"></div>
+<div id="dict" aria-label="dictation">
+  <div class="dk-h">
+    <button id="dk-close" title="close (the text stays here until you use or clear it)">✕</button>
+    <span class="dk-t" id="dk-title">🎙</span>
+    <span class="dk-stat" id="dk-stat">ready</span>
+    <button id="dk-all" title="the whole text, to edit / copy / share">📄</button>
+    <button id="dk-set" title="settings">⚙</button>
+  </div>
+  <div id="dk-meter"><i></i></div>
+  <div id="dk-list"><div class="empty" id="dk-empty">Tap <b>🎙 talk</b> and speak.<br><br>Each pause closes a chunk. Every chunk goes to several transcription engines at once, then gets merged using the tarmac's vocabulary (plane names, yours).<br><br>Tap a version to use it · tap a <span style="background:rgba(248,81,73,.22)">glowing word</span> for the alternatives · long-press the text to edit · turn the phone sideways to see the engines side by side.<br><br><b>↵ use</b> puts the text in the composer · <b>⚡ send</b> sends it.</div></div>
+  <div class="dk-f">
+    <button id="dk-clear" title="clear everything (and the saved audio)">🗑</button>
+    <button id="dk-use" title="put the text in the composer and close">↵ use</button>
+    <button id="dk-mic">🎙 talk</button>
+    <button id="dk-send" title="put the text in the composer and send it (⏭ queues if the plane is flying)">⚡ send</button>
+  </div>
+  <div class="dk-sheet" id="dk-setsheet"><div>
+    <h3>⚙ dictation</h3>
+    <div class="note">Engines, all run in parallel on each chunk:</div>
+    <div id="dk-englist"></div>
+    <label><input type="checkbox" id="dk-opt-live"> 📱 browser live text (Web Speech) <small>free</small></label>
+    <label><input type="checkbox" id="dk-opt-merge"> ✨ merge with the vocabulary <small>~1 s</small></label>
+    <label>pause that ends a chunk <input type="range" id="dk-opt-sil" min="400" max="2000" step="100" style="flex:1"> <small id="dk-silv"></small></label>
+    <label>max chunk <input type="range" id="dk-opt-max" min="8" max="45" step="1" style="flex:1"> <small id="dk-maxv"></small></label>
+    <div class="note">Extra vocabulary (one per line or comma-separated). Plane names and your name come from the tower:</div>
+    <textarea id="dk-opt-vocab" placeholder="e.g. Duncan, sops, Moonshine"></textarea>
+    <div class="note" id="dk-autovocab"></div>
+    <div class="row"><button id="dk-setclose" class="go">done</button></div>
+  </div></div>
+  <div class="dk-sheet" id="dk-allsheet"><div>
+    <h3>📄 the whole text</h3>
+    <textarea id="dk-alltext" style="min-height:45dvh;font-size:16px"></textarea>
+    <div class="row"><button id="dk-allcopy" class="go">📋 copy</button><button id="dk-allshare">↗ share</button><button id="dk-allclose">close</button></div>
+  </div></div>
+  <div id="dk-pop"></div>
+  <div id="dk-toast"></div>
+</div>
+
 
   <div id="tarmac"><div id="apron"><button id="addplane">＋</button><div id="selbox"></div><div id="selchip" title="drag any selected plane to move them together · tap empty tarmac or Esc to clear"><span id="selcount"></span><button id="selclear" aria-label="clear selection">✕</button></div></div><div class="emptytarmac" id="emptytarmac" style="display:none">no aircraft — roll one out with ＋</div></div>
 
@@ -628,8 +735,7 @@
     <textarea id="box" placeholder="say it or type it" rows="2"></textarea>
     <div class="deadman" id="dm"><div class="dm-fill" id="dm-fill"></div><div class="dm-knob" id="dm-knob"></div><div class="dm-txt" id="dm-txt"></div></div>
     <div class="controls">
-      <button id="dictate">📱 dictate</button>
-      <button id="whisper">☁︎ whisper</button>
+      <button id="dictbtn" title="dictate: a full-screen view that listens, transcribes each pause with several engines at once, and merges them with the tarmac's names">🎙 dictate</button>
       <button id="brief" title="add a box that briefs claude on how airport works">🧭</button>
       <button id="attach" title="attach an image/file (or just paste / drop one into the box) — it's saved into the session's cwd and referenced in your message">📎</button>
       <input type="file" id="attachfile" multiple style="display:none">
@@ -2317,7 +2423,6 @@ setInterval(() => {
 
 // ---------- composer: box + dictate + whisper ----------
 const box = $("box"), interimEl = $("interim");
-const dictateBtn = $("dictate"), whisperBtn = $("whisper");
 const dm = $("dm"), dmFill = $("dm-fill"), dmKnob = $("dm-knob"), dmTxt = $("dm-txt");
 const DEADMAN_SECS = 40, STOP_ZONE = 0.38;
 function autoGrow(){ box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight, window.innerHeight * 0.3) + "px"; }
@@ -2466,100 +2571,524 @@ function stopMode(why){
   if (!mode) return;
   const m = mode; mode = null;
   dmStop();
-  if (m === "dictate") stopDictation(why);
-  if (m === "whisper") stopWhisper(why);
 }
 function stopModeSafe(){ try { stopMode("left session"); } catch (_) {} }
 
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recArmed = false;
-if (!SR) { dictateBtn.disabled = true; dictateBtn.textContent = "📱 n/a"; }
-function startDictation(){
-  recArmed = true;
-  rec = new SR();
-  rec.lang = navigator.language || "en-US";
-  rec.continuous = true;
-  rec.interimResults = true;
-  rec.onresult = (e) => {
-    let interim = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) appendText(r[0].transcript);
-      else interim += r[0].transcript;
-    }
-    interimEl.textContent = interim;
-  };
-  rec.onerror = (e) => {
-    hint("dictation error [" + (e.error || "unknown") + "]" + (e.error === "service-not-allowed" ? " — enable iOS dictation" : ""));
-    if (mode === "dictate") { recArmed = false; stopMode("error"); }
-  };
-  rec.onend = () => {
-    if (recArmed && mode === "dictate" && Date.now() < deadline) {
-      try { rec.start(); return; } catch (_) {}
-    }
-    interimEl.textContent = "";
-    if (mode === "dictate") stopMode("ended");
-  };
-  try { rec.start(); } catch (e) { hint("dictation failed: " + e.message); recArmed = false; return; }
-  mode = "dictate";
-  dictateBtn.classList.add("on"); dictateBtn.textContent = "📱 listening…";
-  hint("dictating (slider-left or button to stop)");
-  dmStart("dictating");
+// ---------- 🎙 dictation: a full-screen view (the dictation sub-flight's design, ported Oct-22) ----------
+// One button in the composer opens it and starts recording. The phone cuts a chunk at each pause (voice
+// detection on the mic level); each chunk goes to the tower's /dictate/chunk, which runs several transcription
+// engines on it at once (answers stream back as they finish), then /dictate/merge merges the versions (plus the
+// browser's own live text) into the most likely words, spelled the tarmac's way. Words the engines disagree on
+// glow: tap one for each engine's alternative; tap a version to use it; long-press the text to edit. The audio
+// of each chunk is kept in IndexedDB (↻ retry) until it's used or cleared; the text survives a page reload.
+// ↵ use = append the text to the composer; ⚡ send = that, then ⚡ run (which ⏭ queues if the plane is flying).
+(() => {
+const $ = (id) => document.getElementById(id);
+const ENGINES = [
+  { id:"whisper-1", lab:"whisper", rate:0.006 },
+  { id:"gpt-4o-mini-transcribe", lab:"4o-mini", rate:0.003 },
+  { id:"gpt-4o-transcribe", lab:"4o", rate:0.006 },
+  { id:"gpt-transcribe", lab:"gpt-tr", rate:0.0045 },
+];
+const LAB = { live:"📱 live", merged:"✨ merged", edited:"✎ edited" };
+ENGINES.forEach(e => LAB[e.id] = e.lab);
+const pass = () => localStorage.getItem(LS_PASS) || "";
+const q = (name, params) => BASE + "/dictate/" + name + "?" + new URLSearchParams(Object.assign({ pass:pass() }, params || {}));
+
+// ---------- settings ----------
+const LS = "airport-dict:";
+const S = Object.assign({ engines:ENGINES.map(e => e.id), live:true, merge:true, sil:800, max:25, vocab:"" },
+  JSON.parse(localStorage.getItem(LS + "settings") || "{}"));
+const saveS = () => localStorage.setItem(LS + "settings", JSON.stringify(S));
+$("dk-englist").innerHTML = ENGINES.map(e =>
+  `<label><input type="checkbox" data-eng="${e.id}"> ${e.id} <small>$${e.rate}/min</small></label>`).join("");
+function loadSettingsUI(){
+  document.querySelectorAll("#dict [data-eng]").forEach(c => c.checked = S.engines.includes(c.dataset.eng));
+  $("dk-opt-live").checked = S.live; $("dk-opt-merge").checked = S.merge;
+  $("dk-opt-sil").value = S.sil; $("dk-opt-max").value = S.max; $("dk-opt-vocab").value = S.vocab;
+  $("dk-silv").textContent = S.sil + " ms"; $("dk-maxv").textContent = S.max + " s";
 }
-function stopDictation(why){
-  recArmed = false;
-  try { rec && rec.stop(); } catch (_) {}
-  interimEl.textContent = "";
-  dictateBtn.classList.remove("on"); dictateBtn.textContent = "📱 dictate";
-  hint("dictation " + why);
+function readSettingsUI(){
+  S.engines = [...document.querySelectorAll("#dict [data-eng]")].filter(c => c.checked).map(c => c.dataset.eng);
+  S.live = $("dk-opt-live").checked; S.merge = $("dk-opt-merge").checked;
+  S.sil = +$("dk-opt-sil").value; S.max = +$("dk-opt-max").value; S.vocab = $("dk-opt-vocab").value;
+  saveS();
+}
+$("dk-opt-sil").oninput = () => $("dk-silv").textContent = $("dk-opt-sil").value + " ms";
+$("dk-opt-max").oninput = () => $("dk-maxv").textContent = $("dk-opt-max").value + " s";
+$("dk-set").onclick = () => { loadSettingsUI(); $("dk-setsheet").classList.add("on"); };
+$("dk-setclose").onclick = () => { readSettingsUI(); $("dk-setsheet").classList.remove("on"); fetchVocab(); };
+$("dk-setsheet").onclick = (e) => { if (e.target.id === "dk-setsheet") $("dk-setclose").onclick(); };
+
+function toast(msg, ms){
+  const t = $("dk-toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", ms || 2500);
 }
 
-let mediaStream = null, recorder = null, chunks = [], mimeType = "";
-async function startWhisper(){
-  try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true } }); }
-  catch (e) { hint("mic permission denied: " + e.message); return; }
-  const candidates = ["audio/webm;codecs=opus","audio/webm","audio/mp4","audio/ogg;codecs=opus"];
-  mimeType = candidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
-  try { recorder = mimeType ? new MediaRecorder(mediaStream, {mimeType}) : new MediaRecorder(mediaStream); }
-  catch (e) { hint("MediaRecorder unsupported: " + e.message); mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; return; }
-  chunks = [];
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = onWhisperStop;
-  recorder.start();
-  mode = "whisper";
-  whisperBtn.classList.add("on"); whisperBtn.textContent = "☁︎ recording…";
-  hint("recording for whisper (slider-left or button to finish)");
-  dmStart("whisper rec");
-}
-function stopWhisper(_why){
-  try { recorder && recorder.stop(); } catch (_) {}
-  whisperBtn.classList.remove("on");
-}
-async function onWhisperStop(){
-  (mediaStream ? mediaStream.getTracks() : []).forEach(t => t.stop()); mediaStream = null;
-  const r = recorder; recorder = null;
-  if (!chunks.length) { whisperBtn.textContent = "☁︎ whisper"; hint("nothing recorded"); return; }
-  const blob = new Blob(chunks, {type: r.mimeType || mimeType || "audio/webm"});
-  whisperBtn.classList.add("busy"); whisperBtn.textContent = "☁︎ transcribing…";
+// ---------- vocabulary ----------
+let autoVocab = { owner:"", words:[] };
+async function fetchVocab(){
   try {
-    const resp = await fetch(BASE + "/whisper?pass=" + encodeURIComponent(localStorage.getItem(LS_PASS) || ""),
-      { method:"POST", headers:{"Content-Type": blob.type || "audio/webm"}, body: blob });
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok || !j.ok) hint("whisper failed: " + (j.error || resp.status));
-    else { appendText(j.text); hint("whisper: +" + (j.text||"").length + " chars — edit, then ＋ or ⚡"); }
-  } catch (e) { hint("whisper failed: " + e.message); }
-  whisperBtn.classList.remove("busy"); whisperBtn.textContent = "☁︎ whisper";
+    const r = await fetch(q("vocab"));
+    if (!r.ok) return;
+    autoVocab = await r.json();
+    $("dk-autovocab").textContent = "from the tower: " + [autoVocab.owner, ...autoVocab.words].filter(Boolean).join(", ");
+  } catch (_) {}
 }
-dictateBtn.addEventListener("click", () => {
-  if (mode === "dictate") { stopMode("stopped"); return; }
-  if (mode) stopMode("switched");
-  startDictation();
+function vocabList(){
+  const extra = S.vocab.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  const here = view ? [view] : [];   // the plane you're dictating to comes first
+  return [...new Set([autoVocab.owner, ...here, ...extra, ...autoVocab.words].filter(Boolean))];
+}
+
+// ---------- chunks + persistence (IndexedDB holds the audio until used or cleared) ----------
+let chunks = [];
+let idb = null;
+try {
+  const r = indexedDB.open("airport-dict", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("audio");
+  r.onsuccess = () => { idb = r.result; };
+} catch (_) {}
+function idbPut(k, v){ if (idb) try { idb.transaction("audio", "readwrite").objectStore("audio").put(v, k); } catch (_) {} }
+function idbGet(k){ return new Promise(ok => { if (!idb) return ok(null); const r = idb.transaction("audio").objectStore("audio").get(k); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); }); }
+function idbClear(){ if (idb) try { idb.transaction("audio", "readwrite").objectStore("audio").clear(); } catch (_) {} }
+function persist(){
+  const slim = chunks.map(c => ({ id:c.id, t0:c.t0, dur:c.dur, live:c.live, versions:c.versions, text:c.text, src:c.src, status:c.status === "recording" ? "err" : c.status, mime:c.mime, collapsed:c.collapsed, cost:c.cost }));
+  localStorage.setItem(LS + "chunks", JSON.stringify(slim));
+}
+function restore(){
+  try { chunks = JSON.parse(localStorage.getItem(LS + "chunks") || "[]"); } catch (_) { chunks = []; }
+  chunks.forEach(c => { if (c.status === "up") c.status = "err"; c.versions = c.versions || {}; });
+}
+
+// ---------- word alignment (LCS on normalized words) ----------
+const words = (s) => (s || "").trim().split(/\s+/).filter(Boolean);
+const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+function lcsMap(a, b){            // a, b: arrays of words → m[i] = j matched or -1
+  const A = a.map(norm), B = b.map(norm), n = A.length, m = B.length;
+  const dp = Array.from({ length:n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = A[i] && A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const map = new Array(n).fill(-1);
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (A[i] && A[i] === B[j]) { map[i] = j; i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+  }
+  return map;
+}
+// for word i of the main text: what does each other version say in that slot?
+function altsFor(c, i){
+  const main = words(c.text), out = new Map();
+  for (const [eng, v] of Object.entries(versionTexts(c))) {
+    const b = words(v), map = lcsMap(main, b);
+    if (map[i] >= 0) { addAlt(out, main[i], eng); continue; }
+    let l = i - 1; while (l >= 0 && map[l] < 0) l--;
+    let r = i + 1; while (r < main.length && map[r] < 0) r++;
+    const from = l >= 0 ? map[l] + 1 : 0, to = r < main.length ? map[r] : b.length;
+    const run = r - l - 1, span = to - from;   // map the unmatched run of main onto b[from, to): word i gets its share
+    let phrase;
+    if (span <= 0) phrase = "∅";
+    else if (run <= 1) phrase = b.slice(from, to).join(" ");
+    else { const k = i - l - 1, s = from + Math.floor(k * span / run), e = from + Math.floor((k + 1) * span / run); phrase = b.slice(s, Math.max(e, s + 1)).join(" "); }
+    addAlt(out, phrase, eng);
+  }
+  return out;
+}
+function addAlt(m, p, eng){ if (!m.has(p)) m.set(p, []); m.get(p).push(eng); }
+function versionTexts(c){
+  const o = {};
+  if (c.live) o.live = c.live;
+  for (const [e, v] of Object.entries(c.versions)) if (v && v.text) o[e] = v.text;
+  return o;
+}
+// agreement per main word: the fraction of the other versions that have it in an aligned slot
+function agreement(c){
+  const main = words(c.text), vs = Object.entries(versionTexts(c)).filter(([e]) => e !== c.src);
+  if (!vs.length) return main.map(() => 1);
+  const hits = main.map(() => 0);
+  for (const [, v] of vs) lcsMap(main, words(v)).forEach((j, i) => { if (j >= 0) hits[i]++; });
+  return hits.map(h => h / vs.length);
+}
+
+// ---------- render ----------
+const escD = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[ch]));
+const fmtT = (ms) => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+let recT0 = 0;
+const emptyEl = $("dk-empty");
+function render(){
+  const L = $("dk-list");
+  if (!chunks.length) { L.innerHTML = ""; L.appendChild(emptyEl); updateStat(); return; }
+  L.innerHTML = chunks.map((c, idx) => chunkHTML(c, idx)).join("");
+  updateStat();
+}
+function chunkHTML(c, idx){
+  const st = c.status === "recording" ? '<span class="rec">● rec</span>'
+    : c.status === "up" ? '<span style="color:var(--drun)">⇡ transcribing</span>'
+    : c.status === "err" ? '<span style="color:var(--dbad)">⚠ failed</span> <button data-act="retry" data-i="' + idx + '">↻ retry</button>'
+    : '<span class="src">✓ ' + escD(LAB[c.src] || c.src || "") + "</span>";
+  let main;
+  if (c.status === "recording") main = escD(c.live || "") + ' <span class="interim">' + escD(c.interim || (c.live ? "" : "listening…")) + "</span>";
+  else if (!c.text) main = '<span class="interim">' + escD(c.live || "…") + "</span>";
+  else {
+    const ag = agreement(c);
+    main = words(c.text).map((w, i) => `<span class="w${ag[i] < 0.34 ? " lo" : ag[i] < 0.67 ? " md" : ""}" data-w="${i}">${escD(w)}</span>`).join(" ");
+  }
+  const rows = [];
+  if (c.status !== "recording") {
+    const order = ["merged", ...S.engines.filter(e => c.versions[e] || c.status === "up"), ...Object.keys(c.versions).filter(e => e !== "merged" && !S.engines.includes(e))];
+    const seen = new Set(), mainW = words(c.text);
+    const row = (key, text, ms, cls) => {
+      let tx = escD(text);
+      if (text && c.text && key !== c.src && !cls) {
+        const vw = words(text), map = lcsMap(vw, mainW);
+        tx = vw.map((w, i) => map[i] >= 0 ? escD(w) : `<span class="dw">${escD(w)}</span>`).join(" ");
+      }
+      return `<div class="v${key === c.src ? " on" : ""}${cls ? " " + cls : ""}" data-act="pick" data-i="${idx}" data-k="${key}">
+        <span class="lab">${escD(LAB[key] || key)}${ms != null ? ` <span class="ms">${(ms / 1000).toFixed(1)}s</span>` : ""}</span><span class="tx">${tx}</span></div>`;
+    };
+    for (const k of order) {
+      if (seen.has(k)) continue; seen.add(k);
+      const v = c.versions[k];
+      if (k === "merged" && !v && !(S.merge && c.status === "up")) continue;
+      if (!v) rows.push(row(k, "…", null, "pending"));
+      else if (v.error) rows.push(row(k, "⚠ " + v.error, v.ms, "bad"));
+      else rows.push(row(k, v.text, v.ms));
+    }
+    if (c.live) rows.push(row("live", c.live, null));
+    if (c.src === "edited") rows.push(row("edited", c.text, null));
+  }
+  const cost = (c.cost || 0) ? " · $" + c.cost.toFixed(4) : "";
+  return `<div class="chunk ${c.status}${c.collapsed ? " collapsed" : ""}" data-i="${idx}">
+    <div class="ch"><span>${fmtT(c.t0 || 0)} · ${((c.dur || 0) / 1000).toFixed(1)}s${cost}</span>${st}<span class="sp"></span>
+      ${c.status !== "recording" ? `<button data-act="fold" data-i="${idx}">${c.collapsed ? "▸ versions" : "▾"}</button><button data-act="del" data-i="${idx}">✕</button>` : ""}</div>
+    <div class="main" data-i="${idx}">${main}</div>
+    <div class="vers">${rows.join("")}</div></div>`;
+}
+function renderChunk(c){
+  const idx = chunks.indexOf(c); if (idx < 0) return;
+  const el = document.querySelector(`#dict .chunk[data-i="${idx}"]`);
+  if (!el) return render();
+  if (el.querySelector(".main.editing")) return;   // don't clobber an edit in progress
+  const atBottom = isAtBottom();
+  el.outerHTML = chunkHTML(c, idx);
+  updateStat();
+  if (atBottom) scrollBottom();
+}
+const isAtBottom = () => { const L = $("dk-list"); return L.scrollHeight - L.scrollTop - L.clientHeight < 80; };
+const scrollBottom = () => { const L = $("dk-list"); L.scrollTop = L.scrollHeight; };
+function updateStat(){
+  const cost = chunks.reduce((s, c) => s + (c.cost || 0), 0);
+  const pend = chunks.filter(c => c.status === "up").length, bad = chunks.filter(c => c.status === "err").length;
+  const parts = [];
+  if (rec.on) parts.push(`<span class="rec">● ${fmtT(Date.now() - recT0)}</span>`);
+  parts.push(chunks.length + " chunk" + (chunks.length === 1 ? "" : "s"));
+  if (pend) parts.push(pend + " pending");
+  if (bad) parts.push(`<span style="color:var(--dbad)">${bad} failed</span>`);
+  parts.push("$" + cost.toFixed(3));
+  if (rec.liveState) parts.push(rec.liveState);
+  $("dk-stat").innerHTML = parts.join(" · ");
+}
+setInterval(() => { if (rec.on) updateStat(); }, 500);
+
+// ---------- interactions ----------
+$("dk-list").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-act]");
+  const wEl = e.target.closest(".w");
+  if (wEl && !e.target.closest(".editing")) {
+    const i = +wEl.closest(".main").dataset.i; return showAlts(chunks[i], +wEl.dataset.w, wEl);
+  }
+  if (!a) return;
+  const c = chunks[+a.dataset.i]; if (!c) return;
+  if (a.dataset.act === "pick") {
+    const k = a.dataset.k;
+    const t = k === "live" ? c.live : k === "edited" ? c.text : c.versions[k] && c.versions[k].text;
+    if (t) { c.text = t; c.src = k; persist(); renderChunk(c); }
+  } else if (a.dataset.act === "fold") { c.collapsed = !c.collapsed; persist(); renderChunk(c); }
+  else if (a.dataset.act === "del") { if (confirm("delete this chunk?")) { chunks.splice(chunks.indexOf(c), 1); persist(); render(); } }
+  else if (a.dataset.act === "retry") retry(c);
 });
-whisperBtn.addEventListener("click", () => {
-  if (mode === "whisper") { stopMode("stopped"); return; }
-  if (mode) stopMode("switched");
-  startWhisper();
+let lpT = null;   // long-press the main text → edit it
+$("dk-list").addEventListener("pointerdown", (e) => {
+  const m = e.target.closest(".main"); if (!m || m.classList.contains("editing")) return;
+  lpT = setTimeout(() => { lpT = null; startEdit(m); }, 550);
 });
+["pointerup", "pointercancel", "pointermove"].forEach(ev => $("dk-list").addEventListener(ev, (e) => {
+  if (ev === "pointermove" && Math.abs(e.movementY) < 3) return;
+  clearTimeout(lpT); lpT = null;
+}));
+function startEdit(m){
+  const c = chunks[+m.dataset.i]; if (!c || c.status === "recording") return;
+  hidePop();
+  m.classList.add("editing"); m.contentEditable = "true"; m.textContent = c.text || c.live || "";
+  m.focus();
+  const done = () => {
+    m.removeEventListener("blur", done);
+    m.contentEditable = "false"; m.classList.remove("editing");
+    const t = m.textContent.trim();
+    if (t !== c.text) { c.text = t; c.src = "edited"; persist(); }
+    renderChunk(c);
+  };
+  m.addEventListener("blur", done);
+}
+function showAlts(c, i, el){
+  const alts = altsFor(c, i), cur = words(c.text)[i];
+  const P = $("dk-pop");
+  const items = [...alts.entries()].sort((a, b) => b[1].length - a[1].length);
+  P.innerHTML = items.map(([p, who]) => `<div data-p="${escD(p)}"><span>${p === "∅" ? "<i>(nothing)</i>" : escD(p)}${norm(p) === norm(cur) ? " ✓" : ""}</span><small>${who.map(w => escD(LAB[w] || w)).join(" · ")}</small></div>`).join("")
+    + `<div data-edit="1"><span>✎ edit text…</span><small></small></div>`;
+  const r = el.getBoundingClientRect();
+  P.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 60 - items.length * 44 - 50)) + "px";
+  P.classList.add("on");
+  P.onclick = (e) => {
+    e.stopPropagation();
+    const d = e.target.closest("div[data-p],div[data-edit]"); if (!d) return;
+    hidePop();
+    if (d.dataset.edit) return startEdit(el.closest(".main"));
+    const w = words(c.text);
+    if (d.dataset.p === "∅") w.splice(i, 1); else w[i] = d.dataset.p;
+    c.text = w.join(" "); c.src = "edited"; persist(); renderChunk(c);
+  };
+  setTimeout(() => document.addEventListener("click", hidePop, { once:true }), 0);
+}
+function hidePop(){ $("dk-pop").classList.remove("on"); }
+
+const fullText = () => chunks.map(c => (c.text || c.live || "").trim()).filter(Boolean).join(" ");
+function openAll(){ $("dk-alltext").value = fullText(); $("dk-allsheet").classList.add("on"); }
+$("dk-all").onclick = openAll;
+$("dk-allclose").onclick = () => $("dk-allsheet").classList.remove("on");
+$("dk-allcopy").onclick = async () => { try { await navigator.clipboard.writeText($("dk-alltext").value); toast("copied"); } catch (_) { $("dk-alltext").select(); document.execCommand("copy"); toast("copied"); } };
+$("dk-allshare").onclick = () => { if (navigator.share) navigator.share({ text:$("dk-alltext").value }).catch(() => {}); else toast("no share on this browser"); };
+function clearAll(){ chunks = []; persist(); idbClear(); render(); }
+$("dk-clear").onclick = () => {
+  if (rec.on) return toast("stop first");
+  if (!chunks.length || !confirm("clear all chunks (and their saved audio)?")) return;
+  clearAll();
+};
+
+// ---------- transcription ----------
+function chunkCost(c){
+  const min = (c.dur || 0) / 60000;
+  return Object.keys(c.versions).reduce((s, e) => { const E = ENGINES.find(x => x.id === e); return s + (E && c.versions[e].text != null ? E.rate * min : 0); }, 0)
+    + (c.versions.merged && c.versions.merged.text ? 0.00005 : 0);
+}
+function prevText(c){
+  const i = chunks.indexOf(c);
+  return chunks.slice(Math.max(0, i - 4), i).map(x => x.text || x.live || "").join(" ").slice(-300);
+}
+async function transcribe(c, blob){
+  c.status = "up"; c.versions = {}; renderChunk(c);
+  const vocab = vocabList();
+  // the transcribers only read ~224 tokens of prompt: cap the vocabulary, keep the previous text
+  const prompt = (vocab.length ? "Vocabulary: " + vocab.join(", ").slice(0, 520) + ". " : "") + prevText(c);
+  const engines = S.engines.length ? S.engines : ["gpt-4o-mini-transcribe"];
+  try {
+    const r = await fetch(q("chunk", { engines:engines.join(","), prompt }), { method:"POST", headers:{ "Content-Type":blob.type || c.mime || "audio/webm" }, body:blob });
+    if (r.status === 403) throw new Error("the tower refused the password");
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "HTTP " + r.status); }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await rd.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const o = JSON.parse(line);
+        c.versions[o.engine] = o.error ? { error:o.error, ms:o.ms } : { text:o.text, ms:o.ms };
+        if (!o.error && (!c.text || c.src === "live")) { c.text = o.text; c.src = o.engine; }   // first good answer replaces the live guess
+        c.cost = chunkCost(c); renderChunk(c);
+      }
+    }
+  } catch (e) {
+    c.status = "err"; c.error = e.message; renderChunk(c); persist();
+    toast("chunk failed: " + e.message, 4000);
+    return;
+  }
+  const good = Object.fromEntries(Object.entries(c.versions).filter(([, v]) => v.text != null).map(([k, v]) => [k, v.text]));
+  if (!Object.keys(good).length) { c.status = "err"; renderChunk(c); persist(); return; }
+  if (S.merge) {
+    if (c.live) good["browser-live"] = c.live;
+    const t0 = performance.now();
+    try {
+      const r = await fetch(q("merge"), { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ versions:good, prev:prevText(c), vocab }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      c.versions.merged = { text:j.text, ms:Math.round(performance.now() - t0) };
+      if (c.src !== "edited" && j.text) { c.text = j.text; c.src = "merged"; }
+    } catch (e) { c.versions.merged = { error:String(e.message || e), ms:Math.round(performance.now() - t0) }; }
+  }
+  c.status = "done"; c.cost = chunkCost(c); renderChunk(c); persist();
+}
+async function retry(c){
+  const blob = c.blob || await idbGet(c.id);
+  if (!blob) return toast("the audio for this chunk is gone");
+  transcribe(c, blob);
+}
+
+// ---------- recording: voice-detection-cut MediaRecorder segments ----------
+const rec = { on:false };
+const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+let wakeLock = null;
+async function startRec(){
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } }); }
+  catch (e) { return toast("mic: " + e.message, 4000); }
+  rec.stream = stream;
+  rec.mime = MIMES.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+  const AC = window.AudioContext || window.webkitAudioContext;
+  rec.ctx = new AC(); await rec.ctx.resume().catch(() => {});
+  rec.an = rec.ctx.createAnalyser(); rec.an.fftSize = 1024;
+  rec.ctx.createMediaStreamSource(stream).connect(rec.an);
+  rec.buf = new Float32Array(rec.an.fftSize);
+  rec.floor = 0.01; rec.on = true; recT0 = Date.now();
+  newSegment();
+  rec.tick = setInterval(vadTick, 50);
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch (_) {}
+  if (S.live) startLive();
+  $("dk-mic").classList.add("on"); $("dk-mic").textContent = "■ stop";
+  stream.getAudioTracks()[0].addEventListener("ended", () => { if (rec.on) { toast("the mic was taken away (background?): stopped", 4000); stopRec(); } });
+}
+function newSegment(){
+  const c = { id:"c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t0:Date.now() - recT0, dur:0, live:"", interim:"", versions:{}, text:"", src:"", status:"recording", mime:rec.mime };
+  const parts = [];
+  let mr;
+  try { mr = rec.mime ? new MediaRecorder(rec.stream, { mimeType:rec.mime }) : new MediaRecorder(rec.stream); }
+  catch (e) { toast("MediaRecorder: " + e.message, 4000); stopRec(); return; }
+  mr.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  mr.onstop = () => finishSegment(c, parts, mr.mimeType || rec.mime);
+  if (/webm|ogg/.test(mr.mimeType || rec.mime)) mr.start(1000); else mr.start();   // Safari's mp4 is safer as one piece
+  c.mr = mr; c.start = performance.now(); c.hadSpeech = false; c.lastSpeech = performance.now();
+  rec.cur = c;
+  chunks.push(c);
+  if (chunks.length === 1) render(); else { $("dk-list").insertAdjacentHTML("beforeend", chunkHTML(c, chunks.length - 1)); scrollBottom(); }
+  updateStat();
+}
+function cutSegment(final){
+  const old = rec.cur;
+  if (!final) newSegment();     // start the next recorder before stopping the old: no gap
+  old.dur = performance.now() - old.start;
+  old.status = old.hadSpeech ? "up" : "drop";
+  old.endedAt = performance.now();
+  try { old.mr.stop(); } catch (_) {}
+}
+function finishSegment(c, parts, mime){
+  delete c.mr;
+  if (c.status === "drop" || !parts.length) {            // pure silence: forget it
+    const i = chunks.indexOf(c); if (i >= 0) chunks.splice(i, 1);
+    render(); return;
+  }
+  const blob = new Blob(parts, { type:(mime || "audio/webm").split(";")[0] });
+  c.blob = blob; c.mime = blob.type;
+  idbPut(c.id, blob);
+  setTimeout(() => {   // give the browser's live recognizer a moment to deliver this chunk's final words
+    if (c.interim && !c.live.endsWith(c.interim)) c.live = (c.live + " " + c.interim).trim();
+    c.interim = "";
+    if (c.live && !c.text) { c.text = c.live; c.src = "live"; }
+    transcribe(c, blob);
+  }, rec.live ? 700 : 0);
+  persist();
+}
+function vadTick(){
+  if (!rec.on) return;
+  rec.an.getFloatTimeDomainData(rec.buf);
+  let s = 0; for (const v of rec.buf) s += v * v;
+  const rms = Math.sqrt(s / rec.buf.length);
+  rec.floor = rms < rec.floor ? rms * 0.5 + rec.floor * 0.5 : rec.floor + (rms - rec.floor) * 0.002;   // adaptive noise floor
+  const speech = rms > Math.max(0.008, rec.floor * 2.5);
+  $("dk-meter").firstChild.style.width = Math.min(100, rms * 600) + "%";
+  $("dk-meter").classList.toggle("speech", speech);
+  const c = rec.cur, now = performance.now(), age = now - c.start;
+  if (speech) { c.hadSpeech = true; c.lastSpeech = now; }
+  if (c.hadSpeech && now - c.lastSpeech > S.sil && age > 2000) cutSegment(false);
+  else if (age > S.max * 1000) {
+    if (c.hadSpeech) cutSegment(false);
+    else { c.status = "drop"; const old = c; newSegment(); try { old.mr.stop(); } catch (_) {} }   // long silence: restart quietly
+  }
+}
+function stopRec(){
+  if (!rec.on) return;
+  clearInterval(rec.tick);
+  if (rec.cur) cutSegment(true);
+  rec.on = false;
+  stopLive();
+  setTimeout(() => { try { rec.stream.getTracks().forEach(t => t.stop()); } catch (_) {} try { rec.ctx.close(); } catch (_) {} }, 300);
+  try { wakeLock && wakeLock.release(); } catch (_) {} wakeLock = null;
+  $("dk-meter").firstChild.style.width = "0";
+  $("dk-mic").classList.remove("on"); $("dk-mic").textContent = "🎙 talk";
+  updateStat();
+}
+$("dk-mic").onclick = () => rec.on ? stopRec() : startRec();
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && rec.on) rec.hiddenAt = Date.now();
+  if (!document.hidden && rec.on && rec.hiddenAt) {
+    const tr = rec.stream.getAudioTracks()[0];
+    if (!tr || tr.readyState === "ended" || tr.muted) { toast("recording was paused in the background: stopped", 4000); stopRec(); }
+    rec.hiddenAt = 0;
+  }
+});
+
+// ---------- the browser's own live recognition (Web Speech) ----------
+const SRx = window.SpeechRecognition || window.webkitSpeechRecognition;
+function liveTarget(){
+  // results lag the audio: credit them to the chunk that just closed if it closed < 700 ms ago
+  const prev = chunks.filter(c => c.endedAt && performance.now() - c.endedAt < 700 && !c.text).pop();
+  return prev || rec.cur;
+}
+function startLive(){
+  if (!SRx) { rec.liveState = "📱 n/a"; return; }
+  rec.live = true;
+  const r = new SRx(); rec.sr = r;
+  r.lang = navigator.language || "en-US"; r.continuous = true; r.interimResults = true;
+  r.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (res.isFinal) { const c = liveTarget(); if (c) { c.live = (c.live + " " + res[0].transcript).trim(); c.interim = ""; renderChunk(c); } }
+      else interim += res[0].transcript;
+    }
+    const c = rec.cur; if (c && c.status === "recording") { c.interim = interim; renderChunk(c); }
+  };
+  r.onerror = (e) => { rec.liveState = "📱 " + (e.error || "error"); if (e.error === "not-allowed" || e.error === "service-not-allowed") rec.live = false; updateStat(); };
+  r.onend = () => { if (rec.on && rec.live) { try { r.start(); } catch (_) {} } };
+  try { r.start(); rec.liveState = "📱 on"; } catch (e) { rec.liveState = "📱 " + e.message; rec.live = false; }
+}
+function stopLive(){
+  const r = rec.sr; rec.sr = null;
+  setTimeout(() => { rec.live = false; try { r && r.stop(); } catch (_) {} }, 600);
+}
+
+// ---------- open / close / use / send ----------
+function openDict(){
+  $("dict").classList.add("on");
+  $("dk-title").textContent = "🎙 " + (view ? ((sess(view) || {}).title || view) : "dictation");
+  render(); fetchVocab(); scrollBottom();
+  if (!rec.on) startRec();   // one tap: the view opens already listening
+}
+function closeDict(){ stopRec(); hidePop(); $("dict").classList.remove("on"); }
+// wait for chunks still recording or transcribing (≤ 20 s), then hand the text to the composer
+async function finish(andSend){
+  if (rec.on) stopRec();
+  const t0 = Date.now();
+  while (chunks.some(c => c.status === "recording" || c.status === "up") && Date.now() - t0 < 20000) {
+    $("dk-stat").textContent = "finishing the last chunk…";
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const t = fullText();
+  if (!t) return toast("nothing to use yet");
+  appendText(t);
+  clearAll();
+  closeDict();
+  if (andSend) $("runbtn").click();
+  else hint("🎙 " + t.length + " chars in the composer: edit, then ⚡ or ＋");
+}
+$("dk-close").onclick = closeDict;
+$("dk-use").onclick = () => finish(false);
+$("dk-send").onclick = () => finish(true);
+$("dictbtn").addEventListener("click", openDict);
+
+restore();
+})();
+
 box.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); $("runbtn").click(); }
 });

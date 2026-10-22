@@ -219,6 +219,34 @@ a minimal example and a client) is at
   `POST /queue {pass, id, text}` is the "queue it or fly it" used for the
   messages.
 
+## 🎙 Dictation
+
+The composer's **🎙 dictate** opens a full-screen view that's already
+listening. It's built for talking to a plane from a phone:
+
+- **Rolling chunks.** The phone watches the mic level and closes a chunk at
+  each pause (0.8 s by default, 25 s at most). Each chunk is transcribed while
+  you keep talking, so the text is ready moments after you stop.
+- **Several engines at once.** Every chunk goes to the tower, which runs it
+  through several OpenAI transcription models in parallel (whisper-1,
+  gpt-4o-mini-transcribe, gpt-4o-transcribe, gpt-transcribe; pick in ⚙). Their
+  answers stream back as they finish. The browser's own live recognition is
+  shown too, where the phone allows it.
+- **A merge with the tarmac's vocabulary.** A small model merges the versions
+  into the most likely words, using the owner's name and every plane's id and
+  title as its spelling list, so "pr209" and "airport-2" come out the way the
+  tarmac writes them. Add your own words in ⚙.
+- **Fixing by tapping.** Words the engines disagree on glow; tap one to see
+  each engine's alternative. Tap a version to use it whole, or long-press the
+  text to edit. In landscape the engines sit side by side.
+- **Nothing lost.** Each chunk's audio stays on the phone (IndexedDB) for ↻
+  retry until you use or clear it, and the text survives a page reload.
+- **↵ use** appends the text to the composer; **⚡ send** also sends it
+  (⏭ queued if the plane is flying).
+
+Cost: about $0.02 per minute with all four engines. Audio is sent to OpenAI
+and never written to disk on the tower. Needs `OPENAI_API_KEY`.
+
 ## The header
 
 - **Usage dials:** per account, one bar per subscription window (5h, 7d, …),
@@ -296,8 +324,9 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | `AIRPORT_MAX_TURNS` | daemon | `2` | concurrent turn cap default; per-airfield override in the UI (⚙), applies live |
 | `AIRPORT_TURN_TIMEOUT_MS` | daemon | `0` *(no limit)* | optional per-turn kill switch; ◼ stop is the manual brake |
 | `AIRPORT_STATE_DIR` | both | `~/.airport` | `.env`, token state |
-| `OPENAI_API_KEY` | tower | *(unset)* | enables ☁︎ whisper transcription |
-| `AIRPORT_TRANSCRIBE_MODEL` | tower | `gpt-4o-mini-transcribe` | the ☁︎ transcription model. The tarmac's vocabulary (owner + plane ids + titles) rides along as its prompt; on a refusal it retries on `whisper-1` |
+| `OPENAI_API_KEY` | tower | *(unset)* | enables 🎙 dictation (and `POST /whisper`) |
+| `AIRPORT_DICTATE_MERGE_MODEL` | tower | `gpt-5.4-nano` | the model that merges the engines' versions of each dictated chunk |
+| `AIRPORT_TRANSCRIBE_MODEL` | tower | `gpt-4o-mini-transcribe` | the model behind `POST /whisper` (one-shot transcription). The tarmac's vocabulary (owner + plane ids + titles) rides along as its prompt; on a refusal it retries on `whisper-1` |
 | `AIRPORT_OWNER` | tower | *(unset)* | your name, for the 🧭 briefing ("the user" if unset) |
 | `AIRPORT_URL` | tarmac.js | `http://localhost:<port>` | the tower's URL (set it when the tower runs TLS on a real hostname) |
 
@@ -355,7 +384,8 @@ Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term` / `e
 Daemons: `addbox` / `run-done` / `fs-res`. HTTP (curl-able, all POSTs take
 `pass`): `POST /update`, `POST /run {id, text?}`, `POST /pump {id}`,
 `POST /wake {id}`, `POST /queue {id, text}`, `POST /ember {id, action}`,
-`POST /icon`, `POST /whisper`; `GET /doc`, `GET /health`,
+`POST /icon`, `POST /whisper`, `GET /dictate/vocab`, `POST /dictate/chunk`
+(audio → NDJSON, one line per engine), `POST /dictate/merge`; `GET /doc`, `GET /health`,
 `GET /icon/<id>.png`.
 
 The doc:

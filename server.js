@@ -18,6 +18,7 @@
 //         POST /wake        {pass?, id} → fire one ⏰ timer wake now (see wakeTick)
 //         POST /queue       {pass?, id, text} → ⏭ queue a message if flying, else fly it now
 //         POST /ember       {pass?, id, action} → stop|pause|resume a 🔥 ember tile (see ember tiles)
+//         GET  /dictate/vocab · POST /dictate/chunk · POST /dictate/merge   🎙 the dictation view (see "dictation")
 //         POST /whisper?pass= raw audio → OpenAI transcription (gpt-4o-mini-transcribe + the tarmac's vocabulary)
 //   WS    browsers + host daemons connect, auth, receive the doc, exchange
 //         deltas; run/interrupt/fs are routed to the owning host's socket.
@@ -761,6 +762,68 @@ function whisper(body, contentType, cb, model) {
   req.end(payload);
 }
 
+// ---------- 🎙 dictation: rolling chunks × several transcription engines, then a merge ----------
+// The page's full-screen dictation view cuts the recording at each pause and sends every chunk here. Each
+// chunk goes to all the chosen engines in parallel (answers stream back as NDJSON, one line per engine as it
+// finishes); then /dictate/merge has a small model merge the versions into the most likely words, spelled the
+// tarmac's way (plane ids, owner). Audio is never written to disk. Needs OPENAI_API_KEY.
+//   GET  /dictate/vocab?pass=                         → {owner, words[]}
+//   POST /dictate/chunk?pass=&engines=a,b&prompt=     raw audio → NDJSON {engine, text|error, ms}
+//   POST /dictate/merge?pass=  {versions:{engine:text}, prev, vocab[]} → {text, ms, model}
+const DICT_ENGINES = ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "gpt-transcribe"];
+const DICT_MERGE_MODEL = process.env.AIRPORT_DICTATE_MERGE_MODEL || "gpt-5.4-nano";
+function dictVocab() {
+  const words = new Map();   // lowercase → spelling: plane ids first, then titles (emoji stripped)
+  const add = (w) => { w = String(w || "").replace(/[^\p{L}\p{N}#._\- ]+/gu, "").trim();
+    if (w.length > 1 && w.length < 30 && !words.has(w.toLowerCase())) words.set(w.toLowerCase(), w); };
+  const ss = Object.entries(doc[0].sessions || {}).filter(([, s]) => s);
+  for (const [id] of ss) add(id);
+  for (const [, s] of ss) add(s.title || (s.em && s.em.title));
+  return { owner: process.env.AIRPORT_OWNER || "", words: [...words.values()].slice(0, 80) };
+}
+async function dictTranscribe(model, buf, type, prompt) {
+  const ext = /mp4|m4a|aac/.test(type) ? "mp4" : /ogg/.test(type) ? "ogg" : /wav/.test(type) ? "wav" : /mpeg|mp3/.test(type) ? "mp3" : "webm";
+  const fd = new FormData();
+  fd.append("model", model);
+  fd.append("file", new Blob([buf], { type }), "chunk." + ext);
+  if (prompt) fd.append("prompt", prompt);
+  const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST", headers: { Authorization: "Bearer " + openaiKey() }, body: fd, signal: AbortSignal.timeout(30000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.text == null) throw new Error((j.error && j.error.message) || "HTTP " + r.status);
+  return j.text.trim();
+}
+async function dictMerge({ versions, prev, vocab }) {
+  const lines = Object.entries(versions || {}).filter(([, t]) => t && String(t).trim()).map(([e, t]) => `[${e}] ${String(t).trim()}`);
+  if (!lines.length) return "";
+  const sys = "You merge several speech-to-text versions of ONE chunk of a dictated message (to a coding agent) into the most likely exact words. " +
+    "When a word or phrase matches a vocabulary entry, use the vocabulary's exact spelling AND case (e.g. 'pr42', 'web-ui', 'npm', not 'PR42', 'Web UI', 'NPM'). Never rephrase, summarize, answer or add anything. " +
+    "Keep the speaker's words; fix only misrecognitions, numbers and punctuation. Output only the merged text.";
+  const user = `Vocabulary: ${(Array.isArray(vocab) ? vocab : []).slice(0, 120).join(", ")}\nPrevious text: ${prev ? "…" + String(prev).slice(-300) : "(none)"}\nVersions:\n${lines.join("\n")}`;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST", headers: { Authorization: "Bearer " + openaiKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ model: DICT_MERGE_MODEL, reasoning_effort: "none", messages: [{ role: "system", content: sys }, { role: "user", content: user }] }),
+    signal: AbortSignal.timeout(20000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || "HTTP " + r.status);
+  return String((j.choices && j.choices[0] && j.choices[0].message.content) || "").trim();
+}
+async function dictChunk(res, buf, type, url) {
+  const engines = (url.searchParams.get("engines") || "").split(",").filter((e) => DICT_ENGINES.includes(e));
+  const prompt = (url.searchParams.get("prompt") || "").slice(0, 900);
+  res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+  const t0 = Date.now(), times = {};
+  await Promise.all(engines.map(async (e) => {
+    let line;
+    try { line = { engine: e, text: await dictTranscribe(e, buf, type, prompt), ms: Date.now() - t0 }; }
+    catch (err) { line = { engine: e, error: err.message, ms: Date.now() - t0 }; }
+    times[e] = line.error ? "err" : line.ms;
+    try { res.write(JSON.stringify(line) + "\n"); } catch (_) {}
+  }));
+  res.end();
+  log(`🎙 chunk ${buf.length} B · ${Object.entries(times).map(([e, t]) => e.replace(/^gpt-/, "") + " " + t).join(" · ")}`);
+}
+
 // ---------- http ----------
 const bootT = Date.now();
 function okPass(p) { return !PASS || p === PASS; }
@@ -804,6 +867,10 @@ const handler = (req, res) => {
       clients: clients.size,
     });
   }
+  if (req.method === "GET" && url.pathname === "/dictate/vocab") {
+    if (!okPass(url.searchParams.get("pass"))) return json(res, 403, { ok: false });
+    return json(res, 200, dictVocab());
+  }
   if (req.method === "GET" && url.pathname === "/doc") {
     if (!okPass(url.searchParams.get("pass"))) return json(res, 403, { ok: false });
     return json(res, 200, { ok: true, doc });
@@ -814,6 +881,16 @@ const handler = (req, res) => {
     req.on("data", (d) => { size += d.length; if (size > 26_000_000) req.destroy(); else chunks.push(d); });
     req.on("end", () => {
       const body = Buffer.concat(chunks);
+      if (url.pathname === "/dictate/chunk" || url.pathname === "/dictate/merge") {
+        if (!okPass(url.searchParams.get("pass"))) return json(res, 403, { ok: false, error: "bad pass" });
+        if (!openaiKey()) return json(res, 501, { ok: false, error: "no OPENAI_API_KEY (env or ~/.airport/.env)" });
+        if (url.pathname === "/dictate/chunk")
+          return dictChunk(res, body, req.headers["content-type"] || "audio/webm", url).catch((e) => { try { res.end(); } catch (_) {} log("🎙 chunk failed: " + e.message); });
+        let jb = {}; try { jb = JSON.parse(body.toString("utf8") || "{}"); } catch (_) { return json(res, 400, { ok: false, error: "bad json" }); }
+        const t0 = Date.now();
+        return dictMerge(jb).then((text) => json(res, 200, { ok: true, text, ms: Date.now() - t0, model: DICT_MERGE_MODEL }))
+          .catch((e) => json(res, 502, { ok: false, error: e.message }));
+      }
       if (url.pathname === "/whisper") {
         if (!okPass(url.searchParams.get("pass"))) return json(res, 403, { ok: false });
         return whisper(body, req.headers["content-type"] || "audio/webm", (r) =>
