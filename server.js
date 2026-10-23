@@ -10,6 +10,7 @@
 //
 //   HTTP  GET  /            airport.html (page-version stamped for self-reload)
 //         GET  /pagever     {v}
+//         GET  /sw.js       the page's service worker (offline reloads open the last copy)
 //         GET  /health      {ok, ...}
 //         GET  /doc?pass=   the shelf doc (register-script verification / debug)
 //         POST /auth        {pass} → {ok}
@@ -824,6 +825,26 @@ async function dictChunk(res, buf, type, url) {
   log(`🎙 chunk ${buf.length} B · ${Object.entries(times).map(([e, t]) => e.replace(/^gpt-/, "") + " " + t).join(" · ")}`);
 }
 
+const SW_JS = `// airport's service worker (served by the tower): keeps the last copy of the page for offline reloads
+const C = "airport-page-v1";
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", (e) => {
+  const r = e.request;
+  if (r.method !== "GET" || r.mode !== "navigate") return;   // only the page itself; the rest goes straight out
+  e.respondWith((async () => {
+    const c = await caches.open(C);
+    try {
+      const res = await fetch(r, { signal: AbortSignal.timeout(6000) });
+      if (res.ok) c.put("/", res.clone());
+      return res;
+    } catch (_) {
+      return (await c.match("/")) || new Response("airport: offline, and no saved copy of the page yet", { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
+  })());
+});
+`;
+
 // ---------- http ----------
 const bootT = Date.now();
 function okPass(p) { return !PASS || p === PASS; }
@@ -855,6 +876,12 @@ const handler = (req, res) => {
       res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable", "Access-Control-Allow-Origin": "*" });
       return res.end(buf);
     } catch (_) { res.writeHead(404); return res.end(); }
+  }
+  if (req.method === "GET" && url.pathname === "/sw.js") {
+    // the page's service worker: page loads only, network-first (6 s), falling back to the last copy, so a
+    // reload with no connection still opens airport (with your drafts) instead of a browser error
+    res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "Service-Worker-Allowed": "/" });
+    return res.end(SW_JS);
   }
   if (req.method === "GET" && url.pathname === "/pagever") return json(res, 200, { v: HTML_VER });
   if (req.method === "GET" && url.pathname === "/health") {

@@ -687,6 +687,7 @@
     <button id="gear">⚙</button>
   </header>
   <div id="gaugetip"></div>
+<button id="rescue" style="display:none;position:fixed;left:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:350;padding:10px 14px;border-radius:12px;border:1px solid var(--run);background:#2a210d;color:var(--run);font-weight:600;font-size:14px">📝 unsent text</button>
 <div id="dict" aria-label="dictation">
   <div class="dk-h">
     <button id="dk-close" title="close (the text stays here until you use or clear it)">✕</button>
@@ -973,6 +974,8 @@ function patch(p){
   send({ type: "update", patch: p });
 }
 function wsUrl(){ return BASE.replace(/^http/, "ws"); }
+// a reload with no connection still opens the page (the tower's /sw.js keeps the last copy, network-first)
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("/sw.js").catch(() => {});
 function connect(){
   if (!BASE) { serverSheet(); return; }
   if (ws) { try { ws.onclose = null; ws.close(); } catch(_){} }
@@ -983,7 +986,7 @@ function connect(){
     let m; try { m = JSON.parse(e.data); } catch(_) { return; }
     if (m.type === "doc") {
       reconnectDelay = 1500;
-      doc = m.doc; setStat("ok", "live"); render(); checkPageVer();
+      doc = m.doc; setStat("ok", "live"); render(); checkPageVer(); outboxCheck();
       if (!placeRestored) {
         placeRestored = true;
         const pn = place().plane;
@@ -992,7 +995,7 @@ function connect(){
       return;
     }
     if (m.type === "mem") { renderMem(m); return; }
-    if (m.type === "delta") { shelf_merge(doc, m.delta); render(); checkPageVer(); return; }
+    if (m.type === "delta") { shelf_merge(doc, m.delta); render(); checkPageVer(); if (outbox().length) outboxCheck(); return; }
     if (m.type === "auth-failed") { gated = true; try { ws.close(); } catch(_){} renderGate(); return; }
     if (m.type === "run-failed") { hint("✗ " + (m.error || "run failed")); render(); return; }
     if (m.type === "fs-res") { const cb = fsReqs.get(m.reqId); fsReqs.delete(m.reqId); if (cb) cb(m); return; }
@@ -2381,7 +2384,8 @@ $("addbox").addEventListener("click", () => {
   if (mode) stopMode("adding");
   const text = $("box").value.trim();
   if (!text) { hint("＋ stows the typed/dictated text as a pending box (no run) — ⚡ runs. type something first"); return; }
-  send({ type: "addbox", session: view, text });
+  if (!towerLive()) { hint("⚠ not connected to the tower — your text stays in the box; try again when it says live"); return; }
+  sendText({ type: "addbox", session: view, text }, text);
   $("box").value = ""; autoGrow(); saveDraft();
   hint("box stowed (pending) — stack more, or ⚡ to run");
 });
@@ -2401,22 +2405,24 @@ $("runbtn").addEventListener("click", () => {
     if (mode) stopMode("sending");
     const text = $("box").value.trim();
     if (!text) { hint("⏭ type (or dictate) the message to queue — it goes out when this turn lands · ◼ stops"); return; }
+    if (!towerLive()) { hint("⚠ not connected to the tower — your text stays in the box; try again when it says live"); return; }
     if (!(doc[0].towerFeatures || {}).queue) {   // older tower (restart pending): stow it instead
-      send({ type: "addbox", session: view, text });
+      sendText({ type: "addbox", session: view, text }, text);
       $("box").value = ""; autoGrow(); saveDraft();
       hint("stowed as a pending box (this tower can't auto-queue yet) — ⚡ it after landing");
       return;
     }
-    send({ type: "queue", session: view, text });
+    sendText({ type: "queue", session: view, text }, text);
     $("box").value = ""; autoGrow(); saveDraft();
     hint("⏭ queued — it flies as the next turn when this one lands");
     return;
   }
   if (mode) stopMode("sending");
   const text = $("box").value.trim();
+  if (!towerLive()) { hint("⚠ not connected to the tower — " + (text ? "your text stays in the box; " : "") + "try again when it says live"); return; }
   $("box").value = ""; autoGrow(); saveDraft();
   hint(s.dirty ? "rebuilding edited history — cold cache this run" : "⚡ cleared for takeoff…");
-  send({ type: "run", session: view, text: text || undefined });
+  if (text) sendText({ type: "run", session: view, text }, text); else send({ type: "run", session: view });
 });
 setInterval(() => {
   if (!view) return;
@@ -2453,6 +2459,78 @@ function appendText(t){
   autoGrow(); saveDraft();
   box.scrollTop = box.scrollHeight;
 }
+
+// ---------- the outbox: what you send stays on this device until the tower has it ----------
+// ⚡ run / ⏭ queue / ＋ box clear the composer right away, but the text waits here (localStorage) until the
+// tower's doc shows it as a box in that plane. A websocket can look open while the phone has no network, so
+// a send can vanish: if the box hasn't appeared after OUTBOX_MS, the text goes BACK into that plane's
+// composer (with a note), and the socket is recycled. After a reload, unconfirmed text is restored the same
+// way: as soon as the doc says it never arrived, or after a few seconds with no tower at all.
+const LS_OUTBOX = "airportOutbox_v1", OUTBOX_MS = 8000;
+function outbox(){ try { return JSON.parse(localStorage.getItem(LS_OUTBOX)) || []; } catch (_) { return []; } }
+function setOutbox(a){ try { localStorage.setItem(LS_OUTBOX, JSON.stringify(a)); } catch (_) {} }
+const towerLive = () => !!(ws && ws.readyState === 1 && doc && doc[0]);
+function sendText(msg, text){
+  setOutbox([...outbox(), { session: msg.session, text, at: Date.now() }]);
+  send(msg);
+}
+function outboxArrived(e){
+  const s = sessions()[e.session];
+  return !!s && Object.values(s.messages || {}).some((b) => b && b.role === "user" && String(b.text || "").trim() === e.text && (b.ts || 0) >= e.at - 10 * 60000);
+}
+function restoreText(e){   // back into that plane's composer, ahead of anything typed since
+  const d = drafts(), cur = e.session === view ? box.value : d[e.session] || "";
+  if (cur.includes(e.text)) return;
+  const v = e.text + (cur.trim() ? "\n\n" + cur : "");
+  if (e.session === view) { box.value = v; autoGrow(); saveDraft(); }
+  else { d[e.session] = v; localStorage.setItem(LS_DRAFTS, JSON.stringify(d)); }
+}
+let outboxBootT = Date.now();
+function outboxCheck(){
+  const o = outbox();
+  if (!o.length) return;
+  const keep = [], back = [];
+  for (const e of o) {
+    if (towerLive() && outboxArrived(e)) continue;                       // the tower has it
+    // live doc: anything older than OUTBOX_MS that isn't in it never arrived. No tower at all (an offline
+    // reload): give it 5 s to connect first.
+    const old = Date.now() - e.at > OUTBOX_MS;
+    if (towerLive() ? old : Date.now() - outboxBootT > 5000 && old) back.push(e);
+    else keep.push(e);
+  }
+  if (!back.length) { if (keep.length !== o.length) setOutbox(keep); return; }
+  back.forEach(restoreText);
+  setOutbox(keep);
+  const here = back.some((e) => e.session === view);
+  hint("⚠ " + (back.length > 1 ? back.length + " messages" : "your message") + " didn't reach the tower (connection?) — " + (here ? "it's back in the box" : "it's back in that plane's composer") + ". Send again when it says live.");
+  if (towerLive()) { try { ws.close(); } catch (_) {} }   // that socket was lying: reconnect
+}
+setInterval(() => { outboxCheck(); rescueBtn(); }, 1500);
+// offline (no tower, e.g. a reload with no network) the planes can't be opened, so drafts would sit invisible:
+// a "📝 unsent text" button shows them all, per plane, ready to copy
+function unsent(){
+  const out = {};
+  for (const e of outbox()) out[e.session] = (out[e.session] ? out[e.session] + "\n\n" : "") + e.text;
+  for (const [id, t] of Object.entries(drafts())) if (t && t.trim() && !(out[id] || "").includes(t)) out[id] = (out[id] ? out[id] + "\n\n" : "") + t;
+  return out;
+}
+function rescueBtn(){
+  const b = $("rescue"), n = Object.keys(unsent()).length;
+  const show = !towerLive() && n > 0 && Date.now() - outboxBootT > 3000;
+  b.style.display = show ? "block" : "none";
+  if (show) b.textContent = "📝 unsent text (" + n + ")";
+}
+$("rescue").addEventListener("click", () => {
+  const u = unsent();
+  sheet(`<h3>📝 your unsent text</h3><div class="hint">Saved on this device. The tower isn't reachable right now; this all comes back in each plane's composer when it is.</div>` +
+    Object.entries(u).map(([id, t], i) => `<label>${esc(sess(id).title || id)}</label><textarea id="rs-${i}" rows="5" style="width:100%">${esc(t)}</textarea><div class="btns"><button data-copy="${i}">📋 copy</button></div>`).join("") +
+    `<div class="btns"><button data-x>close</button></div>`, (ov) => {
+    ov.querySelectorAll("[data-copy]").forEach((btn) => btn.addEventListener("click", async () => {
+      const ta = ov.querySelector("#rs-" + btn.dataset.copy);
+      try { await navigator.clipboard.writeText(ta.value); btn.textContent = "✓ copied"; } catch (_) { ta.select(); document.execCommand("copy"); btn.textContent = "✓ copied"; }
+    }));
+  });
+});
 
 // ---------- composer: paste / drop / 📎 images & files ----------
 // The bytes go into the session's cwd (.airport-uploads/, via the fs relay —
