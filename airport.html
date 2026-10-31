@@ -228,7 +228,7 @@
   #gauge .tok.stale{ opacity:.5; }
   #gauge .tn{ font-weight:700; }
   /* one color per account — header dials, plane badges and the flight plan agree */
-  .tk1{ color:#5fb8ff; } .tk2{ color:#ff8fd0; }
+  .tk1{ color:#5fb8ff; } .tk2{ color:#ff8fd0; } .tkgpt{ color:#74d4b4; }
   #gauge .lgrid{ display:grid; grid-template-columns:auto 1fr; gap:1px 4px; align-items:center; }
   #gauge .lb{ font-size:7px; line-height:1; color:var(--dim); text-align:right; }
   #gauge .lb.warn{ color:var(--run); } #gauge .lb.crit{ color:var(--bad); }
@@ -1103,12 +1103,30 @@ function usageBuckets(a){ // doc.usage[k] → { "5h": {util, reset, status}, …
     bk[k] = { util: Number(all[k + "-utilization"]) || 0, reset: (Number(all[k + "-reset"]) || 0) * 1000 || null, status: all[k + "-status"] || null };
   return bk;
 }
+// ◎ OpenAI (ChatGPT / codex) limits: read by the tower from codex's own session logs (never probed), so they're
+// as fresh as the last codex run. doc.codexUsage = JSON {at, plan, windows:[{min, used (%), reset (ms)}], reached}
+function codexUsage(){ try { return JSON.parse((doc[0] && doc[0].codexUsage) || "null"); } catch (_) { return null; } }
+const winLab = (min) => min <= 300 ? "5h" : min >= 10080 ? "7d" : min >= 1440 ? Math.round(min / 1440) + "d" : Math.round(min / 60) + "h";
+function codexRow(){
+  const c = codexUsage();
+  if (!c || !c.windows || !c.windows.length) return "";
+  const stale = Date.now() - (c.at || 0) > 6 * 3600e3;
+  const cells = c.windows.map((w, i) => {
+    const lab = winLab(w.min), pct = Math.round(w.used), cls = useCls(pct), last = i === c.windows.length - 1;
+    const title = `OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""} · ${lab} · ${pct}% used · resets ${esc(fmtReset(w.reset))} · as of ${esc(ago(c.at))} ago (the last codex run)`;
+    const use = `<span class="bar use${cls}" title="${title}"><i style="width:${Math.min(100, pct)}%"></i></span>`;
+    const win = lab === "5h" ? "5h" : "7d";
+    const stack = last || lab === "5h" ? `<span class="bstack">${use}${LIMIT_WIN[win] && w.reset ? timeBar(win, w.reset, lab === "5h" ? "5-hour" : "7-day") : ""}</span>` : use;
+    return `<span class="lb${cls}" title="${title}">${lab}</span>${stack}`;
+  });
+  return `<span class="tok${stale ? " stale" : ""}"><span class="tn tkgpt" title="OpenAI (ChatGPT / codex) limits, read from the last codex run">gpt</span><span class="lgrid">${cells.join("")}</span></span>`;
+}
 let usageProbeT = null, usageSig = "";
 function renderGauge(){
   const g = $("gauge");
   const u = (doc[0] && doc[0].usage) || {};
   const keys = Object.keys(u).sort();
-  if (!keys.length) { g.innerHTML = ""; hideGaugeTip(); return; }
+  if (!keys.length && !codexUsage()) { g.innerHTML = ""; hideGaugeTip(); return; }
   const newest = Math.max(0, ...keys.map((k) => (u[k] || {}).at || 0));
   const sig = keys.map((k) => (u[k] || {}).at).join(",");
   if (sig !== usageSig) { usageSig = sig; clearTimeout(usageProbeT); usageProbeT = null; } // a probe landed → ↻ settles
@@ -1131,7 +1149,7 @@ function renderGauge(){
     }
     return open + `<span class="lgrid">${cells.join("")}</span></span>`;
   }).join("");
-  g.innerHTML = rows + `<span class="asof" title="last probe">${newest ? ago(newest) : ""}</span>` +
+  g.innerHTML = rows + codexRow() + `<span class="asof" title="last probe">${newest ? ago(newest) : ""}</span>` +
     `<button id="limref" title="probe both tokens now (one 1-token call each; at most one probe per 90 s)"${usageProbeT ? " disabled" : ""}>${usageProbeT ? "…" : "↻"}</button>`;
   $("limref").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1204,6 +1222,14 @@ function fillGaugeTip(){
       if (all["fallback-percentage"] != null) meta.push(`fallback at ${Math.round(Number(all["fallback-percentage"]) * 100)}%`);
       if (meta.length) rows.push(`<div class="meta">${esc(meta.join(" · "))}</div>`);
     }
+    blocks.push(rows.join(""));
+  }
+  const c = codexUsage();
+  if (c && c.windows && c.windows.length) {
+    const rows = [`<div class="acctrow"><span class="tkgpt">gpt</span> · OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""}<span class="when">as of ${esc(ago(c.at))} ago</span></div>`];
+    for (const w of c.windows) { const u = (w.used || 0) / 100;
+      rows.push(`<div class="winrow"><span class="w">${esc(winLab(w.min))}</span> <span class="${sevCls(u)}">${tipBar(u)}</span> <span class="pct ${sevCls(u)}">${Math.round(w.used)}%</span> <span class="rst">${w.reset ? "· resets " + untilTxt(w.reset) : ""}</span></div>`); }
+    rows.push(`<div class="meta">read from codex's own logs at its last run (never probed)${c.reached ? " · limit reached: " + esc(c.reached) : ""}</div>`);
     blocks.push(rows.join(""));
   }
   tip.innerHTML = blocks.join("<hr>");

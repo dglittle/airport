@@ -252,6 +252,10 @@ and never written to disk on the tower. Needs `OPENAI_API_KEY`.
 - **Usage dials:** per account, one bar per subscription window (5h, 7d, …),
   read from the rate-limit headers of a 1-token probe (polled gently; ↻ probes
   now). The thin bar under each shows how much of the window has elapsed.
+- **gpt dial:** the OpenAI (ChatGPT / codex) subscription's windows, read
+  passively from the codex CLI's own session logs on the tower's machine
+  (`~/.codex/sessions`), never probed: as fresh as the last codex run, and it
+  says how old.
 - **Box meter:** the tower machine's RAM, swap, and every ✻ claude process
   on it with its RSS (airport's turns and anything else), pushed every 10 s.
   Hover or tap it for a card that also names the **biggest processes**, by

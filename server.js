@@ -670,6 +670,45 @@ function fetchUsage(force) {
       messages: [{ role: "user", content: "hi" }] }));
   });
 }
+// ---------- ◎ OpenAI (ChatGPT / codex) limits: PASSIVE, never probed ----------
+// The codex CLI logs its subscription's rate limits in every token_count event of its session logs
+// (~/.codex/sessions/Y/M/D/rollout-*.jsonl on the tower's machine): windows of window_minutes, used_percent,
+// resets_at (epoch s). We read the newest entry (newest files of the last 3 days, 512 KB tails), so the numbers
+// are as fresh as the last codex run; `at` says when that was. doc.codexUsage is a JSON string (no stale keys)
+// and is only rewritten when it changes. Deliberately passive: no extra calls to OpenAI.
+const CODEX_SESS = path.join(os.homedir(), ".codex", "sessions");
+function codexLimits() {
+  try {
+    const files = [];
+    for (let d = 0; d < 3 && files.length < 10; d++) {
+      const day = new Date(Date.now() - d * 86400e3);
+      const dir = path.join(CODEX_SESS, String(day.getUTCFullYear()), String(day.getUTCMonth() + 1).padStart(2, "0"), String(day.getUTCDate()).padStart(2, "0"));
+      let names = []; try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl")); } catch (_) { continue; }
+      for (const n of names) { try { files.push({ p: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }); } catch (_) {} }
+    }
+    files.sort((a, b) => b.mtime - a.mtime);
+    for (const f of files.slice(0, 10)) {
+      const fd = fs.openSync(f.p, "r"), size = fs.fstatSync(fd).size, len = Math.min(size, 512 * 1024), buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len); fs.closeSync(fd);
+      const lines = buf.toString("utf8").split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"rate_limits"') || !lines[i].includes('"used_percent"')) continue;
+        let o; try { o = JSON.parse(lines[i]); } catch (_) { continue; }
+        const rl = o.payload && o.payload.rate_limits;
+        if (!rl || !rl.primary) continue;
+        const win = (w) => w && typeof w.used_percent === "number" ? { min: Number(w.window_minutes) || 0, used: w.used_percent, reset: (Number(w.resets_at) || 0) * 1000 || null } : null;
+        return { at: new Date(o.timestamp).getTime() || f.mtime, plan: rl.plan_type || null,
+          windows: [win(rl.primary), win(rl.secondary)].filter(Boolean).sort((x, y) => x.min - y.min),
+          reached: rl.rate_limit_reached_type || null };
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+const pushCodexUsage = () => { const d = codexLimits(); apply({ codexUsage: d ? JSON.stringify(d) : null }); };
+setInterval(pushCodexUsage, 60_000).unref();
+setTimeout(pushCodexUsage, 2000);
+
 setInterval(() => fetchUsage(false), 10 * 60 * 1000);
 setTimeout(() => fetchUsage(true), 3000);
 
