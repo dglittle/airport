@@ -360,8 +360,10 @@ function wakeBlocked(s, useGate) {
   if (flying >= cap) return "airfield at its turn cap (" + flying + "/" + cap + ")";
   if (useGate) {
     const gate = Number(s.wakeGate) > 0 ? Number(s.wakeGate) : 0.8;
-    const use = Object.values(doc[0].usage || {}).filter((u) => u && typeof u.five === "number");
-    if (use.length && use.every((u) => u.five >= gate)) return "5h use ≥ " + Math.round(gate * 100) + "% on every account";
+    // each account's nearest limit: its 5h window, or its 7d one if it has no 5h window
+    const load = (u) => (typeof u.five === "number" ? u.five : typeof u.seven === "number" ? u.seven : null);
+    const use = Object.values(doc[0].usage || {}).filter((u) => u && !u.err && load(u) != null);
+    if (use.length && use.every((u) => load(u) >= gate)) return "use ≥ " + Math.round(gate * 100) + "% on every account";
   }
   return null;
 }
@@ -648,7 +650,9 @@ function fetchUsage(force) {
         const m = /^anthropic-ratelimit-unified-(.+)$/.exec(k);
         if (m) all[m[1]] = String(v);
       }
-      const entry = all["5h-utilization"] != null ? {
+      // any reported window counts (an account can have no 5h window: weekly only, e.g. Oct-30 on account 2);
+      // absent windows are null, which also clears stale numbers from an earlier probe
+      const entry = Object.keys(all).some((k) => /-utilization$/.test(k)) ? {
         five: num(all["5h-utilization"]),
         fiveReset: (num(all["5h-reset"]) || 0) * 1000 || null,
         seven: num(all["7d-utilization"]),

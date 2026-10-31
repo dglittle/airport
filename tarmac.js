@@ -105,7 +105,7 @@ function flags(a) { const o = {}; for (let i = 0; i < a.length; i++) if (a[i].st
   } else if (cmd === "usage") {
     const d = await getDoc();
     for (const [k, u] of Object.entries(d.usage || {}))
-      console.log(`account ${k}: 5h ${u.five == null ? "?" : Math.round(u.five * 100) + "%"} · 7d ${u.seven == null ? "?" : Math.round(u.seven * 100) + "%"} · checked ${ago(u.at)} ago${u.err ? " · " + u.err : ""}`);
+      console.log(`account ${k}: 5h ${u.five == null ? (u.err ? "?" : "none") : Math.round(u.five * 100) + "%"} · 7d ${u.seven == null ? "?" : Math.round(u.seven * 100) + "%"} · checked ${ago(u.at)} ago${u.err ? " · " + u.err : ""}`);
   } else {
     console.log(fs.readFileSync(__filename, "utf8").split("\n").filter((l) => l.startsWith("//")).slice(0, 21).join("\n"));
   }
