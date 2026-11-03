@@ -1140,8 +1140,8 @@ function codexRow(){
   if (!c || !c.windows || !c.windows.length) return "";
   const stale = Date.now() - (c.at || 0) > 6 * 3600e3;
   const cells = c.windows.map((w, i) => {
-    const lab = winLab(w.min), pct = Math.round(w.used), cls = useCls(pct), last = i === c.windows.length - 1;
-    const title = `OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""} · ${lab} · ${pct}% used · resets ${esc(fmtReset(w.reset))} · as of ${esc(ago(c.at))} ago (the last codex run)`;
+    const lab = winLab(w.min), gone = w.reset && w.reset < Date.now(), pct = gone ? 0 : Math.round(w.used), cls = useCls(pct), last = i === c.windows.length - 1;
+    const title = `OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""} · ${lab} · ${pct}% used` + (gone ? " (the window has reset since the last reading)" : ` · resets ${esc(fmtReset(w.reset))}`) + ` · as of ${esc(ago(c.at))} ago (the last codex run)`;
     const use = `<span class="bar use${cls}" title="${title}"><i style="width:${Math.min(100, pct)}%"></i></span>`;
     const win = lab === "5h" ? "5h" : "7d";
     const stack = last || lab === "5h" ? `<span class="bstack">${use}${LIMIT_WIN[win] && w.reset ? timeBar(win, w.reset, lab === "5h" ? "5-hour" : "7-day") : ""}</span>` : use;
@@ -1255,8 +1255,8 @@ function fillGaugeTip(){
   const c = codexUsage();
   if (c && c.windows && c.windows.length) {
     const rows = [`<div class="acctrow"><span class="tkgpt">gpt</span> · OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""}<span class="when">as of ${esc(ago(c.at))} ago</span></div>`];
-    for (const w of c.windows) { const u = (w.used || 0) / 100;
-      rows.push(`<div class="winrow"><span class="w">${esc(winLab(w.min))}</span> <span class="${sevCls(u)}">${tipBar(u)}</span> <span class="pct ${sevCls(u)}">${Math.round(w.used)}%</span> <span class="rst">${w.reset ? "· resets " + untilTxt(w.reset) : ""}</span></div>`); }
+    for (const w of c.windows) { const gone = w.reset && w.reset < Date.now(), u = gone ? 0 : (w.used || 0) / 100;
+      rows.push(`<div class="winrow"><span class="w">${esc(winLab(w.min))}</span> <span class="${sevCls(u)}">${tipBar(u)}</span> <span class="pct ${sevCls(u)}">${Math.round(u * 100)}%</span> <span class="rst">${gone ? "· reset since the reading" : w.reset ? "· resets " + untilTxt(w.reset) : ""}</span></div>`); }
     rows.push(`<div class="meta">read from codex's own logs at its last run (never probed)${c.reached ? " · limit reached: " + esc(c.reached) : ""}</div>`);
     blocks.push(rows.join(""));
   }

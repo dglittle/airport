@@ -673,21 +673,22 @@ function fetchUsage(force) {
 // ---------- ◎ OpenAI (ChatGPT / codex) limits: PASSIVE, never probed ----------
 // The codex CLI logs its subscription's rate limits in every token_count event of its session logs
 // (~/.codex/sessions/Y/M/D/rollout-*.jsonl on the tower's machine): windows of window_minutes, used_percent,
-// resets_at (epoch s). We read the newest entry (newest files of the last 3 days, 512 KB tails), so the numbers
+// resets_at (epoch s). We read the newest entry (newest day folders first, ≤ 40 files, 512 KB tails), so the numbers
 // are as fresh as the last codex run; `at` says when that was. doc.codexUsage is a JSON string (no stale keys)
 // and is only rewritten when it changes. Deliberately passive: no extra calls to OpenAI.
 const CODEX_SESS = path.join(os.homedir(), ".codex", "sessions");
 function codexLimits() {
   try {
+    // newest day folders first (Y/M/D), as far back as it takes: codex may not have run for days
+    const ls = (d) => { try { return fs.readdirSync(d).sort().reverse(); } catch (_) { return []; } };
     const files = [];
-    for (let d = 0; d < 3 && files.length < 10; d++) {
-      const day = new Date(Date.now() - d * 86400e3);
-      const dir = path.join(CODEX_SESS, String(day.getUTCFullYear()), String(day.getUTCMonth() + 1).padStart(2, "0"), String(day.getUTCDate()).padStart(2, "0"));
-      let names = []; try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl")); } catch (_) { continue; }
-      for (const n of names) { try { files.push({ p: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }); } catch (_) {} }
+    for (const y of ls(CODEX_SESS)) for (const m of ls(path.join(CODEX_SESS, y))) for (const dd of ls(path.join(CODEX_SESS, y, m))) {
+      if (files.length >= 40) break;
+      const dir = path.join(CODEX_SESS, y, m, dd);
+      const day = ls(dir).filter((n) => n.endsWith(".jsonl")).map((n) => { try { return { p: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }; } catch (_) { return null; } }).filter(Boolean);
+      files.push(...day.sort((a, b) => b.mtime - a.mtime));
     }
-    files.sort((a, b) => b.mtime - a.mtime);
-    for (const f of files.slice(0, 10)) {
+    for (const f of files.slice(0, 40)) {
       const fd = fs.openSync(f.p, "r"), size = fs.fstatSync(fd).size, len = Math.min(size, 512 * 1024), buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, size - len); fs.closeSync(fd);
       const lines = buf.toString("utf8").split("\n");
@@ -705,7 +706,7 @@ function codexLimits() {
   } catch (_) {}
   return null;
 }
-const pushCodexUsage = () => { const d = codexLimits(); apply({ codexUsage: d ? JSON.stringify(d) : null }); };
+const pushCodexUsage = () => { const d = codexLimits(); if (d) apply({ codexUsage: JSON.stringify(d) }); };   // never blank a known reading
 setInterval(pushCodexUsage, 60_000).unref();
 setTimeout(pushCodexUsage, 2000);
 
