@@ -146,6 +146,13 @@ lists and scratch pads that should live where the work lives.
   each cwd. It's a pending box: stack your actual ask on top, then ⚡. With
   `AIRPORT_OWNER` set on the tower, it names you ("Greta may edit past
   boxes…"); unset, it says "the user".
+  It covers turns, talking to the tower (tarmac.js, fork), and when and how to
+  start an ember, get woken by its `tell`, and clean it up. Your airport's own
+  notes (memory limits, TLS, ports in use) go in optional files on the tower:
+  `~/.airport/brief.md` for every plane and `~/.airport/brief.<host>.md` for
+  planes on that machine. They're appended to the briefing, with `{id}`, `{cwd}`,
+  `{model}`, `{host}`, `{owner}` and `{tower}` filled in, and re-read within 30 s
+  of a change.
 - **📎 attach / paste / drop** a file or image into the composer: it's saved
   into the session's cwd and referenced in your message.
 - **Per-turn cost.** Every landed turn pins its stats on its last ai box:
