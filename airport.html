@@ -1348,7 +1348,9 @@ function renderTarmac(){
     el.style.setProperty("--e", isEmber ? (em.total ? Math.min(1, (em.done || 0) / em.total) : 1) : 0);
     // ⏰ wake timer badge: --wt = what's left of the interval; data-wake = count | soon (≤2 min) | due | wait (blocked)
     const wEvery = isTile ? 0 : Number(s.wakeEvery) || 0;
-    const wLeft = wEvery >= 5 ? (Number(s.lastWakeAt) || 0) + wEvery * 60000 - now : 0;
+    // a timer just set (the tower starts its clock within a minute) counts as a full interval, not "due"
+    const wFresh = !Number(s.lastWakeAt) || (s.wakeArmed != null && s.wakeArmed !== wEvery);
+    const wLeft = wEvery >= 5 ? (wFresh ? wEvery * 60000 : Number(s.lastWakeAt) + wEvery * 60000 - now) : 0;
     const wake = wEvery < 5 ? "" : s.wakeWait ? "wait" : wLeft <= 0 ? "due" : wLeft <= 120000 ? "soon" : "count";
     if (wake) el.dataset.wake = wake; else delete el.dataset.wake;
     el.style.setProperty("--wt", wake ? Math.max(0, Math.min(1, wLeft / (wEvery * 60000))) : 0);
