@@ -345,7 +345,7 @@ function routePump(id, fail) {
 
 // ---------- ⏰ wake timer: a plane that flies itself every N minutes ----------
 // s.wakeEvery = minutes (≥ 5; null/0 = off). Once a minute the tower checks each plane:
-// due when now ≥ (s.lastWakeAt || 0) + wakeEvery. A pump plane (pumpText) pumps — the
+// due when now ≥ s.lastWakeAt + wakeEvery (setting or changing the interval starts the clock; see wakeTick). A pump plane (pumpText) pumps — the
 // transcript never grows; any other plane gets s.wakeText (default "⏰ wake") as a new turn.
 // Not due-and-blocked (flying, airfield offline / at its turn cap, usage gate) = no box is
 // added and lastWakeAt doesn't move: it just tries again next minute (s.wakeWait says why).
@@ -386,11 +386,20 @@ function fireWake(id, useGate) {
   else log("wake " + id);
   return err;
 }
+// Setting a timer STARTS its clock: the first wake comes one interval later (not "never woken = due now").
+// s.wakeArmed = the interval the clock was started for; a new interval, or a timer switched back on, restarts
+// the clock. A timer from before this rule (lastWakeAt set, no wakeArmed) keeps its schedule.
 function wakeTick() {
   const now = Date.now();
   for (const [id, s] of Object.entries(doc[0].sessions || {})) {
-    const every = Number(s && s.wakeEvery) || 0;
-    if (!s || s.kind || every < 5) continue;
+    if (!s || s.kind) continue;
+    const every = Number(s.wakeEvery) || 0;
+    if (every < 5) { if (s.wakeArmed != null) apply({ sessions: { [id]: { wakeArmed: null } } }); continue; }
+    if (s.wakeArmed !== every) {
+      const keep = s.wakeArmed == null && Number(s.lastWakeAt) > 0;   // an older timer: just record it
+      apply({ sessions: { [id]: keep ? { wakeArmed: every } : { wakeArmed: every, lastWakeAt: now, wakeWait: null } } });
+      if (!keep) continue;
+    }
     if (now < (Number(s.lastWakeAt) || 0) + every * 60_000) continue;
     fireWake(id, true);
   }

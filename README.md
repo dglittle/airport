@@ -172,6 +172,8 @@ lists and scratch pads that should live where the work lives.
   at its cap) just retries next minute; `wakeGate` (default 0.8) skips wakes
   while every account's 5h use is at or above the gate. `POST /wake {pass, id}`
   fires one now.
+  Setting the timer (or changing its interval, or switching it back on) starts
+  its clock: the first wake comes one interval later, never immediately.
 - **tarmac.js** is a plain CLI over the tower (`ls`, `show`, `say`, `queue`,
   `wake`, `new`, `set`, `usage`, `ember`), e.g. for a plane that oversees other planes.
 
@@ -414,7 +416,7 @@ The doc:
     token, lastToken,           // pinned account (1|2, absent = sticky failover) · the one it last flew on
     queueWait,                  // why a ⏭ queue is waiting / held
     pumpText,                   // ⛽ pump message (absent = not a pump plane)
-    wakeEvery, wakeText, wakeGate, lastWakeAt, wakeWait,   // ⏰ timer
+    wakeEvery, wakeText, wakeGate, lastWakeAt, wakeWait, wakeArmed,   // ⏰ timer (wakeArmed = the interval its clock was started for)
     iconV,                      // 🖼 icon version (cache-buster)
     messages: { m000001: { role, text, ts, synced, stats, depth } },
 } } }
