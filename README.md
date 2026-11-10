@@ -297,7 +297,31 @@ laptop):
 node daemon.js
 ```
 
-Browsers: open `https://your.box:7800`, type the passphrase once per device.
+Browsers: open `https://your.box:7800` and type the passphrase once, or better,
+pair them (below) so the passphrase never has to travel.
+
+### 📱 Pairing devices (instead of sharing the passphrase)
+
+- **⚙ → 📱 add a device** shows a one-use QR code (valid 5 minutes). Scan it with a
+  phone, or tap "copy the link instead" and open it in another browser or
+  profile. On first use the link's key is swapped for a fresh one that only
+  that browser knows, so a photo or copy of the QR is worthless afterwards.
+- **⚙ → devices** lists them ("iPhone · Safari", last seen): ✎ rename, ✕ revoke
+  (its open connection drops at once). Only a hash of each key is stored, in
+  `~/.airport/devices.json`. `tarmac.js pair` prints a QR in a terminal;
+  `tarmac.js devices` lists them.
+- **Machines still use the passphrase:** a device key can't act as a ground
+  crew. Once your browsers are paired, rotate the passphrase to a long random
+  one: write it into `.env` on every machine and restart the tower and the
+  ground crews. Restart them with `AIRPORT_PASS` unset in their environment
+  (`env -u AIRPORT_PASS …`): an inherited env var beats the file, and a turn
+  launched by a ground crew inherits its env.
+- **Guess limit:** 10 failed logins per address per hour, then that address is
+  refused, even with the right passphrase (the tower's own machine is exempt).
+  The count lives in the tower's memory, so restarting the tower clears it.
+  Mind a ground crew left on a stale passphrase: it retries every few seconds
+  and locks its own address out within a minute, so switch every machine at
+  once.
 
 ### Reboot-proofing
 
