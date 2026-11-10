@@ -1217,7 +1217,9 @@ function ckRing(o, sz = 24){
     return p;
   };
   let inner, sev = "";
-  if (o.err) inner = `<circle cx="12" cy="12" r="10" fill="none" stroke="var(--bad)" stroke-width="2.6" stroke-dasharray="2.2 1.8"/><path d="M8.5 8.5l7 7m0-7l-7 7" stroke="var(--bad)" stroke-width="2.2"/>`;
+  if (o.off) inner = `<circle cx="12" cy="12" r="10" fill="none" stroke="var(--dim)" stroke-width="2" stroke-dasharray="1.6 2.4"/>` +   // an account switched off: calm, not an alarm
+    `<text x="12" y="15" text-anchor="middle" font-size="8.5" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="var(--dim)">${esc(o.lab)}</text>`;
+  else if (o.err) inner = `<circle cx="12" cy="12" r="10" fill="none" stroke="var(--bad)" stroke-width="2.6" stroke-dasharray="2.2 1.8"/><path d="M8.5 8.5l7 7m0-7l-7 7" stroke="var(--bad)" stroke-width="2.2"/>`;
   else {
     inner = one(o.outer, 10, 2.8) + one(o.inner, 6, 2.4) +
       `<text x="12" y="${o.inner ? 14.3 : 15}" text-anchor="middle" font-size="${o.inner ? 6.5 : 8.5}" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="${o.col}">${esc(o.lab)}</text>`;
@@ -1329,6 +1331,7 @@ function renderGauge(){
   // one ring per account: the outer arc = its weekly window (the fuller of 7d / f7d), the inner arc = its 5h window if it has one
   const rings = keys.map((k) => {
     const a = u[k] || {}, stale = !a.at || now - a.at > 25 * 60_000;
+    if (a.off) return ckRing({ lab: k, off: true, title: `t${k}: off · this account isn't accepting subscription logins (switched off on its side); everything flies on the others` });
     if (a.err) return ckRing({ lab: k, col: col[k] || "var(--muted)", err: true, stale, title: `t${k}: probe failed · ${a.err}` });
     const bk = usageBuckets(a), weekReset = (bk["7d"] || bk["7d_oi"] || {}).reset;
     const wk = ["7d", "7d_oi"].filter((b) => bk[b]).map((b) => bk[b].util * 100);
@@ -1397,7 +1400,8 @@ function fillGaugeTip(){
     const tag = CIRC[+k] || k;
     const activeOn = Object.keys(hh).filter((h) => hh[h] && String(hh[h].activeToken || 1) === k && hostUp(h));
     const rows = [`<div class="acctrow">t${esc(k)} · account ${esc(k)}${activeOn.length ? ` <span class="meta">· flying ${esc(activeOn.join("+"))}</span>` : ""}<span class="when">${a.at ? "probed " + ago(a.at) : ""}</span></div>`];
-    if (a.err) rows.push(`<div class="bad">✗ ${esc(a.err)}</div>`);
+    if (a.off) rows.push(`<div class="meta">⏸ off: this account isn't accepting subscription logins (switched off on its side). Nothing flies on it; it comes back by itself when it's switched on again.</div>`);
+    else if (a.err) rows.push(`<div class="bad">✗ ${esc(a.err)}</div>`);
     else {
       let all = null;
       try { all = JSON.parse(a.hdrs || ""); } catch (_) {}

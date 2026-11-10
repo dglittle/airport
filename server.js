@@ -674,8 +674,10 @@ function fetchUsage(force) {
         sevenReset: (num(all["7d-reset"]) || 0) * 1000 || null,
         status: String(all["status"] || ""),
         hdrs: JSON.stringify(all),
-        at: Date.now(), err: null,
-      } : { at: Date.now(), err: "no usage headers (http " + res.statusCode + ")" };
+        at: Date.now(), err: null, off: null,
+      } : res.statusCode === 403   // the account refuses subscription logins: switched off on its side, not broken
+        ? { at: Date.now(), off: true, err: "off: the account refuses subscription logins (http 403)" }
+        : { at: Date.now(), err: "no usage headers (http " + res.statusCode + ")" };
       apply({ usage: { [String(i + 1)]: entry } });
     });
     req.on("error", (e) => apply({ usage: { [String(i + 1)]: { at: Date.now(), err: e.message } } }));
