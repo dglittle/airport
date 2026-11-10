@@ -381,6 +381,12 @@
   .sheet .hostrow span{ flex:1; overflow:hidden; text-overflow:ellipsis; }
   .sheet .hostrow span .off{ color:var(--dim); }
   .sheet .hostrow input{ width:74px; flex:0 0 auto; text-align:center; }
+  .sheet .devrow{ display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+  .sheet .devrow .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sheet .devrow .ago{ color:var(--dim); font-size:11px; }
+  .sheet .devrow button{ background:transparent; border:1px solid var(--rule); color:var(--muted); border-radius:6px; padding:3px 8px; cursor:pointer; }
+  .sheet .qr{ background:#fff; border-radius:10px; padding:6px; margin:10px auto 4px; width:min(240px,75%); }
+  .sheet .qr svg{ display:block; width:100%; height:auto; }
   .gate{ text-align:center; }
   .gate .big{ font-size:34px; margin-bottom:6px; }
   .gate p{ color:var(--muted); font-size:12.5px; }
@@ -861,6 +867,22 @@ const LS_PLACE = "airportPlace_v1"; // where-was-I: open plane + open file per p
 let placeRestored = false;  // restore only on the FIRST doc — reconnects must not yank the user around
 function place(){ try { return JSON.parse(localStorage.getItem(LS_PLACE)) || {}; } catch (_) { return {}; } }
 function placePut(fn){ const p = place(); fn(p); try { localStorage.setItem(LS_PLACE, JSON.stringify(p)); } catch (_) {} }
+// 📱 opened from a pairing QR (⚙ → add a device): #pair=<this browser's own key> — keep it, wipe it from the address bar
+(() => {
+  const m = /[#&]pair=([A-Za-z0-9_-]{40,})/.exec(location.hash || "");
+  if (!m) return;
+  try {
+    localStorage.setItem(LS_PASS, m[1]);
+    if (location.protocol.startsWith("http")) localStorage.setItem(LS_URL, location.origin);
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch (_) {}
+})();
+function deviceGuess(){ // a name for the devices list ("iPhone · Safari"); editable there
+  const u = navigator.userAgent;
+  const os = /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) ? "iPad" : /Android/.test(u) ? "Android" : /Mac OS X/.test(u) ? "Mac" : /Windows/.test(u) ? "Windows" : /Linux/.test(u) ? "Linux" : "device";
+  const br = /Edg\//.test(u) ? "Edge" : /CriOS|Chrome\//.test(u) ? "Chrome" : /FxiOS|Firefox\//.test(u) ? "Firefox" : /Safari\//.test(u) ? "Safari" : "browser";
+  return os + " · " + br;
+}
 let BASE = localStorage.getItem(LS_URL) ||
   (location.protocol.startsWith("http") ? location.origin : "");
 let doc = [null, null];
@@ -981,7 +1003,7 @@ function connect(){
   if (ws) { try { ws.onclose = null; ws.close(); } catch(_){} }
   setStat("warn", "connecting…");
   ws = new WebSocket(wsUrl());
-  ws.onopen = () => { send({ type: "auth", role: "browser", pass: localStorage.getItem(LS_PASS) || "" }); };
+  ws.onopen = () => { send({ type: "auth", role: "browser", pass: localStorage.getItem(LS_PASS) || "", name: deviceGuess() }); };
   ws.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch(_) { return; }
     if (m.type === "doc") {
@@ -996,6 +1018,12 @@ function connect(){
     }
     if (m.type === "mem") { renderMem(m); return; }
     if (m.type === "delta") { shelf_merge(doc, m.delta); render(); checkPageVer(); if (outbox().length) outboxCheck(); return; }
+    if (m.type === "rekey") { try { localStorage.setItem(LS_PASS, m.key); } catch (_) {} return; } // paired: the QR's key → this browser's own
+    if (m.type === "device-joined") {
+      hint("📱 " + (m.name || "a device") + " joined");
+      const pb = document.getElementById("pair-box"); if (pb) pb.innerHTML = `<div class="hint" style="text-align:center">✓ ${esc(m.name || "device")} is in</div>`;
+      loadDevices(); return;
+    }
     if (m.type === "auth-failed") { gated = true; try { ws.close(); } catch(_){} renderGate(); return; }
     if (m.type === "run-failed") { hint("✗ " + (m.error || "run failed")); render(); return; }
     if (m.type === "fs-res") { const cb = fsReqs.get(m.reqId); fsReqs.delete(m.reqId); if (cb) cb(m); return; }
@@ -1586,6 +1614,9 @@ function serverSheet(){
     <label>tower url</label><input id="f-url" value="${esc(BASE)}" placeholder="https://tower.example:7800" autocomplete="off">
     <label>passphrase (if the tower has one)</label><input id="f-pass" type="password" value="${esc(localStorage.getItem(LS_PASS) || "")}" autocomplete="off">
     ${hostRows ? `<label>airfields — parallel turn cap</label>${hostRows}` : ""}
+    ${doc[0] ? `<label>devices</label><div id="dev-list"><div class="hint">…</div></div>
+    <div id="pair-box"></div>
+    <div class="btns"><button id="f-pair">📱 add a device</button></div>` : ""}
     <div class="btns"><button data-x>cancel</button><button class="go" id="f-go">connect</button></div>
     <div class="hint">${hostRows ? "caps apply immediately (no restart) · " : ""}the html can be opened anywhere — it just needs this URL</div>`,
   (ov) => {
@@ -1594,6 +1625,8 @@ function serverSheet(){
       inp.value = v;
       patch({ hosts: { [inp.dataset.cap]: { turnCap: v } } });
     }));
+    const fp = ov.querySelector("#f-pair");
+    if (fp) { fp.addEventListener("click", pairNew); loadDevices(); }
     ov.querySelector("#f-go").addEventListener("click", () => {
       BASE = ov.querySelector("#f-url").value.trim().replace(/\/+$/, "");
       localStorage.setItem(LS_URL, BASE);
@@ -1603,10 +1636,53 @@ function serverSheet(){
     });
   });
 }
+// ---------- 📱 devices: pair by QR, list, rename, revoke (tower: /pair/new, /devices…) ----------
+async function towerPost(p, body){
+  const r = await fetch(BASE + p, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ pass: localStorage.getItem(LS_PASS) || "" }, body || {})) });
+  return r.json().catch(() => ({}));
+}
+async function loadDevices(){
+  const el = document.getElementById("dev-list"); if (!el) return;
+  let j = {}; try { j = await towerPost("/devices"); } catch (_) { el.innerHTML = '<div class="hint">tower unreachable</div>'; return; }
+  if (!j.ok) { el.innerHTML = '<div class="hint">(this tower has no device list)</div>'; return; }
+  const rows = (j.devices || []).map((d) => `<div class="devrow"><span class="nm">${esc(d.name)}${d.id === j.me ? " <b>· this one</b>" : ""}</span>
+    <span class="ago">${d.lastSeen ? esc(ago(d.lastSeen)) : ""}</span><button data-ren="${esc(d.id)}" title="rename">✎</button><button data-rev="${esc(d.id)}" title="cut off">✕</button></div>`).join("");
+  el.innerHTML = rows + (j.me ? "" : `<div class="hint">this browser is in by passphrase — pair it too (open the QR's link here) so the passphrase can retire</div>`);
+  const byId = Object.fromEntries((j.devices || []).map((d) => [d.id, d]));
+  el.querySelectorAll("[data-ren]").forEach((b) => b.addEventListener("click", async () => {
+    const d = byId[b.dataset.ren]; const name = prompt("name for this device", d.name);
+    if (name && name.trim()) { await towerPost("/devices/rename", { id: d.id, name: name.trim() }); loadDevices(); }
+  }));
+  el.querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
+    const d = byId[b.dataset.rev];
+    if (!confirm(`cut off "${d.name}"${d.id === j.me ? " (THIS browser)" : ""}? it'll need a new QR to get back in`)) return;
+    await towerPost("/devices/revoke", { id: d.id }); loadDevices();
+  }));
+}
+async function pairNew(){
+  const box = document.getElementById("pair-box"); if (!box) return;
+  box.innerHTML = '<div class="hint">making a code…</div>';
+  let j = {}; try { j = await towerPost("/pair/new"); } catch (_) {}
+  if (!j.ok) { box.innerHTML = '<div class="hint">couldn\'t make a code</div>'; return; }
+  box.innerHTML = `<div class="qr">${j.svg}</div>
+    <div class="hint" style="text-align:center">point the new device's camera here · works once · <span id="pair-left"></span></div>
+    <div class="btns"><button id="pair-copy">copy the link instead</button></div>`;
+  box.querySelector("#pair-copy").addEventListener("click", async (e) => {
+    try { await navigator.clipboard.writeText(j.url); e.target.textContent = "copied ✓ — open it on the other device"; } catch (_) { prompt("copy this link", j.url); }
+  });
+  const tick = () => {
+    const left = j.expires - Date.now(), el = box.querySelector("#pair-left");
+    if (!el) return clearInterval(t);
+    if (left <= 0) { clearInterval(t); box.innerHTML = '<div class="hint" style="text-align:center">that code expired — tap again for a new one</div>'; return; }
+    el.textContent = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")} left`;
+  };
+  const t = setInterval(tick, 1000); tick();
+}
 function renderGate(){
   setStat("bad", "auth");
   sheet(`<div class="gate"><div class="big">✈</div>
-    <p>this tower wants a passphrase (its <b>AIRPORT_PASS</b>). once per device.</p>
+    <p>this tower wants a passphrase (its <b>AIRPORT_PASS</b>). once per device —<br>or, easier: on a device that's already in, ⚙ → <b>📱 add a device</b>, and scan its QR with this one.</p>
     <label>passphrase</label><input id="g-pass" type="password" autocomplete="off">
     <div class="btns"><button class="go" id="g-go">enter</button></div>
     <div class="hint" id="g-err"></div></div>`,
@@ -1616,7 +1692,7 @@ function renderGate(){
       try {
         const r = await fetch(BASE + "/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pass }) });
         const j = await r.json().catch(() => ({}));
-        if (j.ok) { localStorage.setItem(LS_PASS, pass); gated = false; ov.remove(); connect(); }
+        if (j.ok) { localStorage.setItem(LS_PASS, j.key || pass); gated = false; ov.remove(); connect(); }
         else ov.querySelector("#g-err").textContent = "not it";
       } catch (_) { ov.querySelector("#g-err").textContent = "tower unreachable"; }
     };

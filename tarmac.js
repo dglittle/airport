@@ -17,6 +17,8 @@
 //                                                   put an ember (github.com/dglittle/ember) on the tarmac;
 //                                                   its new `tell` messages go to --owner as user turns
 //   node ~/airport/tarmac.js ember <tile> stop|pause|resume     steer it
+//   node ~/airport/tarmac.js pair [name]            📱 a one-use QR (5 min) that lets a new phone/computer in
+//   node ~/airport/tarmac.js devices                paired devices · `devices revoke <id>` cuts one off
 //
 // The tower owns everything; this is just HTTP: GET /doc, POST /update, /run, /wake, /queue, /ember.
 const fs = require("fs"), os = require("os"), path = require("path");
@@ -36,7 +38,33 @@ const boxes = (s) => Object.keys(s.messages || {}).sort().map((k) => s.messages[
 const one = (t, n) => String(t || "").replace(/\s+/g, " ").trim().slice(0, n);
 function flags(a) { const o = {}; for (let i = 0; i < a.length; i++) if (a[i].startsWith("--")) o[a[i].slice(2)] = a[i + 1], i++; return o; }
 
+// the address a phone should open: AIRPORT_PUBLIC_URL, else the crew's AIRPORT_SERVER (wss→https), else BASE
+const PUBLIC = conf("AIRPORT_PUBLIC_URL", "") || conf("AIRPORT_SERVER", "").replace(/^ws/, "http") || BASE;
+
 (async () => {
+  if (cmd === "pair") {
+    const j = await post("/pair/new", { name: [id, ...rest].join(" ") || undefined });
+    if (!j.ok) throw new Error(j.error || "the tower said no (old tower? bad pass?)");
+    const url = PUBLIC.replace(/\/+$/, "") + "/#pair=" + j.url.split("#pair=")[1];
+    const qr = require("./vendor/qrcode.js")(0, "L"); qr.addData(url); qr.make();
+    const n = qr.getModuleCount(), on = (r, c) => r >= 0 && r < n && c >= 0 && c < n && qr.isDark(r, c);
+    let out = ""; // two QR rows per text line (▀ ▄ █), dark-on-light with a 2-module quiet zone
+    for (let r = -2; r < n + 2; r += 2) {
+      out += "\x1b[30;47m";
+      for (let c = -2; c < n + 2; c++) out += on(r, c) ? (on(r + 1, c) ? "█" : "▀") : (on(r + 1, c) ? "▄" : " ");
+      out += "\x1b[0m\n";
+    }
+    console.log(out + "\nscan it, or open on the new device (works once, for 5 minutes):\n" + url);
+    return;
+  }
+  if (cmd === "devices") {
+    if (id === "revoke") { const j = await post("/devices/revoke", { id: rest[0] }); console.log(j.ok ? "revoked" : j.error); return; }
+    const j = await post("/devices", {});
+    if (!j.ok) throw new Error(j.error || "the tower said no");
+    for (const d of j.devices) console.log(`${d.id}  ${d.name.padEnd(24)}  seen ${ago(d.lastSeen)} ago  ${d.ip}`);
+    if (!j.devices.length) console.log("(no paired devices yet)");
+    return;
+  }
   if (cmd === "ls") {
     const d = await getDoc();
     const rows = Object.entries(d.sessions || {}).filter(([, s]) => s && !s.kind)

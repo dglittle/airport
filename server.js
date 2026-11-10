@@ -898,15 +898,129 @@ self.addEventListener("fetch", (e) => {
 });
 `;
 
+// ---------- 📱 devices: one random key per browser, paired by QR ----------
+// The page keeps its key where it used to keep the passphrase and sends it as `pass`, so every
+// browser path accepts master pass OR a device key; host (ground crew) auth needs the master pass.
+// Pairing: an authed page POSTs /pair/new → a fresh key, unclaimed, good for PAIR_MS; the QR is
+// <tower>/#pair=<key> (the #fragment never reaches a server). The first auth with it claims it.
+// Only sha256(key) is stored, in ~/.airport/devices.json (600). Revoke = delete + drop its sockets.
+//   POST /pair/new {pass, name?} → {key, url, svg, expires}  ·  POST /devices {pass} → {devices[]}
+//   POST /devices/revoke {pass, id}  ·  POST /devices/rename {pass, id, name}
+// Guess limit: FAIL_MAX failed auths per IP per hour, then that IP is refused until they age out.
+const DEVICES = path.join(STATE_DIR, "devices.json");
+const PAIR_MS = 5 * 60_000;
+let devices = {};
+try { devices = JSON.parse(fs.readFileSync(DEVICES, "utf8")) || {}; } catch (_) {}
+const sha = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
+function saveDevices() {
+  const tmp = DEVICES + ".tmp";
+  try { fs.writeFileSync(tmp, JSON.stringify(devices, null, 1), { mode: 0o600 }); fs.renameSync(tmp, DEVICES); }
+  catch (e) { log("📱 devices save failed: " + e.message); }
+}
+function sameSecret(a, b) {
+  a = Buffer.from(String(a)); b = Buffer.from(String(b));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function deviceId(p) { // → id of a live device key, or null
+  if (typeof p !== "string" || p.length < 40) return null;
+  const h = sha(p);
+  for (const [id, d] of Object.entries(devices))
+    if (d && d.hash === h) return (d.claimed || Date.now() - d.created < PAIR_MS) ? id : null;
+  return null;
+}
+// first use claims it: the QR's key is swapped for a fresh one only this browser ever sees (returned →
+// sent to the page as "rekey"), so a photo of the QR is worthless once it's been used. Later uses bump lastSeen.
+function touchDevice(id, ip, name) {
+  const d = devices[id]; if (!d) return null;
+  const first = !d.claimed;
+  let key = null;
+  if (first) {
+    key = crypto.randomBytes(32).toString("base64url");
+    d.hash = sha(key); d.claimed = Date.now(); if (name) d.name = String(name).slice(0, 60);
+  }
+  d.lastSeen = Date.now(); d.ip = ip;
+  saveDevices();
+  if (first) {
+    log(`📱 device joined: ${d.name} (${id}) from ${ip}`);
+    for (const c of clients) if (c._role === "browser") { try { c.send(JSON.stringify({ type: "device-joined", id, name: d.name })); } catch (_) {} }
+  }
+  return key;
+}
+setInterval(() => { // unclaimed keys past their 5 minutes are gone
+  let n = 0;
+  for (const [id, d] of Object.entries(devices)) if (d && !d.claimed && Date.now() - d.created > PAIR_MS) { delete devices[id]; n++; }
+  if (n) saveDevices();
+}, 60_000).unref();
+function newDevice(name, by) {
+  const key = crypto.randomBytes(32).toString("base64url"); // 43 chars, 256 bits
+  const id = crypto.randomBytes(4).toString("hex");
+  devices[id] = { hash: sha(key), name: String(name || "new device").slice(0, 60), created: Date.now(), claimed: 0, lastSeen: 0, ip: "", by: by || "" };
+  saveDevices();
+  return { id, key };
+}
+function qrSvg(text) {
+  const qr = require("./vendor/qrcode.js")(0, "M");
+  qr.addData(text); qr.make();
+  return qr.createSvgTag({ cellSize: 6, margin: 4, scalable: true });
+}
+function deviceList() {
+  return Object.entries(devices).filter(([, d]) => d && d.claimed)
+    .map(([id, d]) => ({ id, name: d.name, claimed: d.claimed, lastSeen: d.lastSeen, ip: d.ip }))
+    .sort((a, b) => b.lastSeen - a.lastSeen);
+}
+function dropDevice(id) {
+  delete devices[id]; saveDevices();
+  for (const c of clients) if (c._dev === id) { try { c.send(JSON.stringify({ type: "auth-failed" })); c.close(); } catch (_) {} }
+}
+const FAIL_MAX = 10, FAIL_WINDOW = 3600_000;
+const fails = new Map(); // ip → [t, …]
+function failsOf(ip) {
+  const a = (fails.get(ip) || []).filter((t) => Date.now() - t < FAIL_WINDOW);
+  if (a.length) fails.set(ip, a); else fails.delete(ip);
+  return a;
+}
+// this machine's own addresses (its crew + scripts dial the public name, so they arrive from the public ip)
+const selfIps = new Set(["127.0.0.1", "::1"]);
+for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) selfIps.add(a.address);
+try {
+  const selfHost = new URL(String(process.env.AIRPORT_SERVER || "").replace(/^ws/, "http")).hostname;
+  if (selfHost) require("dns").lookup(selfHost, { all: true }, (e, addrs) => { for (const a of addrs || []) selfIps.add(a.address); });
+} catch (_) {}
+function ipOf(req) { return String((req && req.socket && req.socket.remoteAddress) || "?").replace(/^::ffff:/, ""); }
+// → "master" | "device:<id>" | null — the one gate for every browser/script path.
+// opts.seen: bump the device's lastSeen (ws connects do; per-request http doesn't, to spare the disk)
+// opts.claim: may claim an unclaimed (QR) key — ws browser auth and /auth only, since they can hand the
+//   fresh key back (opts.newKey); everywhere else an unclaimed key is just refused
+function authAs(p, ip, opts) {
+  if (!PASS) return "master"; // yard mode: no passphrase configured
+  if (!selfIps.has(ip) && failsOf(ip).length >= FAIL_MAX) return null; // this machine is never locked out
+  if (typeof p === "string" && p && sameSecret(p, PASS)) return "master";
+  const id = deviceId(p);
+  if (id) {
+    if (!devices[id].claimed) {
+      if (!(opts && opts.claim)) return null;
+      opts.newKey = touchDevice(id, ip, opts.name);
+    } else if (opts && opts.seen) touchDevice(id, ip);
+    return "device:" + id;
+  }
+  if (p) { // an empty pass is a page asking "do I need one?", not a guess
+    const a = failsOf(ip); a.push(Date.now()); fails.set(ip, a); const n = a.length;
+    log(`🔒 bad auth from ${ip} (${n}/${FAIL_MAX} this hour)${n >= FAIL_MAX ? " — refusing this ip for the hour" : ""}`);
+  }
+  return null;
+}
+
 // ---------- http ----------
 const bootT = Date.now();
-function okPass(p) { return !PASS || p === PASS; }
 function json(res, status, obj) {
   res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify(obj));
 }
 const handler = (req, res) => {
   const url = new URL(req.url, "http://x");
+  const ip = ipOf(req);
+  let who = null; // set by okPass: "master" | "device:<id>"
+  const okPass = (p) => !!(who = authAs(p, ip));
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -938,13 +1052,10 @@ const handler = (req, res) => {
   }
   if (req.method === "GET" && url.pathname === "/pagever") return json(res, 200, { v: HTML_VER });
   if (req.method === "GET" && url.pathname === "/health") {
-    const ss = doc[0].sessions || {}, hh = doc[0].hosts || {};
+    // public, so no names: session/host/client details are behind the pass (/doc)
     return json(res, 200, {
-      ok: true, service: "airport-tower", version: VERSION, port: PORT,
+      ok: true, service: "airport-tower", version: VERSION,
       uptimeSec: Math.floor((Date.now() - bootT) / 1000), authRequired: !!PASS,
-      sessions: Object.keys(ss).length,
-      hosts: Object.fromEntries(Object.entries(hh).map(([k, v]) => [k, !!(v && v.online)])),
-      clients: clients.size,
     });
   }
   if (req.method === "GET" && url.pathname === "/dictate/vocab") {
@@ -978,8 +1089,35 @@ const handler = (req, res) => {
       }
       let j = {};
       try { j = JSON.parse(body.toString("utf8") || "{}"); } catch (_) { return json(res, 400, { ok: false, error: "bad json" }); }
-      if (url.pathname === "/auth") return json(res, okPass(j.pass) ? 200 : 403, { ok: okPass(j.pass) });
+      if (url.pathname === "/auth") {
+        const o = { claim: true, name: j.name }, ok = !!authAs(j.pass, ip, o);
+        return json(res, ok ? 200 : 403, o.newKey ? { ok, key: o.newKey } : { ok });
+      }
       if (!okPass(j.pass)) return json(res, 403, { ok: false, error: "bad pass" });
+      if (url.pathname === "/pair/new") {
+        const { id, key } = newDevice(j.name, who);
+        const host = /^[a-z0-9.:\[\]-]+$/i.test(String(req.headers.host || "")) ? req.headers.host : `localhost:${PORT}`;
+        const pairUrl = `${CERT ? "https" : "http"}://${host}/#pair=${key}`;
+        log(`📱 pairing code made by ${who} (${id}), good for ${PAIR_MS / 60_000} min`);
+        return json(res, 200, { ok: true, id, url: pairUrl, svg: qrSvg(pairUrl), expires: Date.now() + PAIR_MS });
+      }
+      if (url.pathname === "/devices") {
+        const me = who && who.startsWith("device:") ? who.slice(7) : null;
+        return json(res, 200, { ok: true, me, devices: deviceList() });
+      }
+      if (url.pathname === "/devices/revoke") {
+        const id = String(j.id || "");
+        if (!devices[id]) return json(res, 404, { ok: false, error: "no such device" });
+        log(`📱 device revoked: ${devices[id].name} (${id}) by ${who}`);
+        dropDevice(id);
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/devices/rename") {
+        const id = String(j.id || "");
+        if (!devices[id]) return json(res, 404, { ok: false, error: "no such device" });
+        devices[id].name = String(j.name || "").slice(0, 60) || devices[id].name; saveDevices();
+        return json(res, 200, { ok: true });
+      }
       if (url.pathname === "/update") {
         if (!j.patch || typeof j.patch !== "object") return json(res, 400, { ok: false, error: "no patch" });
         const before = { ...(doc[0].sessions || {}) };
@@ -1037,7 +1175,8 @@ if (CERT && KEY) {
 const { WebSocketServer } = require("ws");
 const wss = new WebSocketServer({ server, perMessageDeflate: false });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  const ip = ipOf(req);
   const peerId = crypto.randomBytes(3).toString("hex");
   let authed = false;
   const authTimer = setTimeout(() => { if (!authed) { try { ws.close(); } catch (_) {} } }, 8000);
@@ -1049,7 +1188,7 @@ wss.on("connection", (ws) => {
 
     if (m.type === "auth") {
       if (authed) return;
-      if (m.role === "host" && okPass(m.pass) && /^[a-z0-9-]{1,32}$/.test(String(m.host || ""))) {
+      if (m.role === "host" && authAs(m.pass, ip) === "master" && /^[a-z0-9-]{1,32}$/.test(String(m.host || ""))) {
         authed = true; ws._role = "host"; ws._host = m.host;
         // one daemon per machine: a newer socket for the same host supersedes the old
         for (const c of clients) if (c !== ws && c._role === "host" && c._host === m.host) { try { c.close(); } catch (_) {} }
@@ -1072,8 +1211,10 @@ wss.on("connection", (ws) => {
         }
         apply(patch);
         setTimeout(() => kickQueues(m.host), 1000); // parked queues on this airfield can fly again
-      } else if (m.role === "browser" && okPass(m.pass)) {
+      } else if (m.role === "browser" && (ws._who = authAs(m.pass, ip, (ws._ao = { seen: true, claim: true, name: m.name })))) {
         authed = true; ws._role = "browser";
+        if (ws._who.startsWith("device:")) ws._dev = ws._who.slice(7);
+        if (ws._ao.newKey) { try { ws.send(JSON.stringify({ type: "rekey", key: ws._ao.newKey })); } catch (_) {} }
         clients.add(ws);
       } else {
         log(`peer=${peerId} bad auth (role=${m.role})`);
