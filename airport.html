@@ -181,6 +181,14 @@
   /* bare glass: a framed ember's page speaks for itself, so airport draws no ring, panel or glow around it (no-frame
      embers keep the ring). The selection outline, unread dot and drag shadow stay, same as planes. */
   .plane.ember:has(> .eframe){ border-width:0; background:none; }
+  /* a bare-glass ember that's unreachable (⚠) or stalled (zz): its page may be frozen on its last frame, so airport
+     says so: a pip in the top-left (where planes' ⏰ sits) and a greyed tile. Healthy embers look unchanged. */
+  .plane .empip{ position:absolute; z-index:3; top:calc(var(--S)*-0.012); left:calc(var(--S)*-0.012);
+    width:max(15px,calc(var(--S)*0.0375)); aspect-ratio:1; border-radius:50%; border:max(1.5px,calc(var(--S)*0.0044)) solid var(--bg);
+    display:grid; place-items:center; font:800 max(7.5px,calc(var(--S)*0.016))/1 -apple-system,system-ui,sans-serif; pointer-events:none; }
+  .plane .empip.unreachable{ background:var(--bad); color:#fff; }
+  .plane .empip.stalled{ background:var(--run); color:#2a1800; }
+  .plane.ember.gone > .eframe{ filter:grayscale(.85) brightness(.55); }
   .plane.ember:not(.dragging):has(> .eframe){ box-shadow:none; }
   .plane.ember > .eframe{ border-radius:18%; }
   .plane .qn{ position:absolute; right:4%; bottom:4%; z-index:2; font:700 max(8px,11cqw)/1.1 ui-monospace,Menlo,monospace;
@@ -1364,6 +1372,7 @@ function renderTarmac(){
     el.classList.toggle("ember", isEmber);
     el.classList.toggle("live", isEmber && ["running", "starting", "stopping"].includes(emSt));
     el.classList.toggle("bad", isEmber && ["failed", "stalled", "unreachable"].includes(emSt));
+    el.classList.toggle("gone", isEmber && !!s.frame && (emSt === "unreachable" || emSt === "stalled"));
     el.classList.toggle("done", isEmber && emSt === "done");
     el.classList.toggle("running", !isTile && !!s.running);
     el.classList.toggle("hot", !isTile && !s.running && isHot(s));
@@ -1404,7 +1413,7 @@ function renderTarmac(){
            wake === "wait" ? String(s.wakeWait) : wake === "due" ? `⏰ wake due (every ${wEvery}m)`
            : wake ? `⏰ every ${wEvery}m · next in ${fmtWake(wLeft)}` : ""]).filter(Boolean).join(" · ");
       const html = `
-        ${isUnread(s) ? '<div class="unread"></div>' : ""}${wake ? `<div class="wake">${s.pumpText && String(s.pumpText).trim() ? "⛽" : "⏰"}</div>` : ""}
+        ${isEmber && s.frame && (emSt === "unreachable" || emSt === "stalled") ? `<div class="empip ${emSt}" title="${emSt === "unreachable" ? "can't reach this ember: its page may be frozen" : "this ember stopped sending heartbeats: its work may have died"}">${emSt === "unreachable" ? "⚠" : "zz"}</div>` : ""}${isUnread(s) ? '<div class="unread"></div>' : ""}${wake ? `<div class="wake">${s.pumpText && String(s.pumpText).trim() ? "⛽" : "⏰"}</div>` : ""}
         ${isEmber && s.frame && s.url ? `<div class="eframe"><iframe src="${esc(s.url)}" tabindex="-1" scrolling="no" referrerpolicy="no-referrer" title="${esc(name)}"></iframe></div>`
         : isNote ? `<div class="paper"><div class="ntext">${noteHTML(s.text)}</div></div>`
         : `<div class="emoji">${isNote ? "" : iconImg(id, s, "picon")}<span class="eglyph">${esc(isEmber ? s.emoji || em.emoji || "🔥" : emojiFor(id, s))}</span></div>`}
