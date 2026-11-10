@@ -623,6 +623,12 @@ function hashHtml() {
 HTML_VER = hashHtml();
 apply({ pageVersion: HTML_VER });
 apply({ owner: process.env.AIRPORT_OWNER || null }); // whose airport: the 🧭 briefing names them (unset = "the user")
+// this machine's own notes for the 🧭 briefing (ports, memory etiquette…): <state>/brief.md, published as
+// doc.briefLocal and re-read whenever it changes. Absent = the generic brief only.
+const BRIEF_LOCAL = path.join(STATE_DIR, "brief.md");
+const loadBriefLocal = () => { let t = null; try { t = fs.readFileSync(BRIEF_LOCAL, "utf8").trim() || null; } catch (_) {} apply({ briefLocal: t }); };
+loadBriefLocal();
+fs.watchFile(BRIEF_LOCAL, { interval: 5000 }, loadBriefLocal);
 fs.watchFile(HTML, { interval: 2000 }, () => {
   const v = hashHtml();
   if (v && v !== HTML_VER) { HTML_VER = v; apply({ pageVersion: v }); }
