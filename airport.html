@@ -267,6 +267,39 @@
   #gaugetip .ok{ color:var(--hot); } #gaugetip .warn{ color:var(--run); } #gaugetip .bad{ color:var(--bad); }
   #gaugetip .meta{ color:var(--dim); white-space:normal; }
   #gaugetip hr{ border:none; border-top:1px solid var(--rule); margin:7px 0; }
+  #gaugetip button{ background:transparent; border:1px solid var(--rule); color:var(--muted); border-radius:6px; padding:1px 7px; font:11px ui-monospace,Menlo,monospace; cursor:pointer; }
+  #gaugetip button:disabled{ opacity:.5; cursor:wait; }
+  #gaugetip .ckrow{ display:flex; align-items:center; gap:6px; line-height:1.5; padding:1px 0; }
+  #gaugetip .ckrow .ckg{ flex:0 0 26px; display:flex; justify-content:center; }
+  #gaugetip .ckrow .w{ flex:0 0 76px; min-width:0; color:var(--dim); }
+  #gaugetip .ckrow .v{ color:var(--ink); white-space:normal; overflow-wrap:anywhere; flex:1; min-width:0; }
+  #gaugetip .ckrow .v small{ color:var(--dim); font-size:10px; }
+
+  /* ---------- 🛩 the cockpit (inside a plane): round instruments for the values that move (context fuel,
+     cache heat, usage rings, RAM), and a "dark cockpit" annunciator for the on/off facts: every lamp is dark
+     when normal and lights (amber, or red) only when something is unusual. The sub line hides; its facts
+     live in the plane card (tap the instruments). Colour is never the only signal: lamps carry letters,
+     warnings add ▲ / ■, stale data is dashed. ---------- */
+  svg.ck{ display:block; overflow:visible; flex:0 0 auto; }
+  #badges, #cockpit{ display:none; align-items:center; flex:0 0 auto; cursor:pointer; }
+  header.cockpit #badges, header.cockpit #cockpit{ display:flex; }
+  header.cockpit .sub{ display:none; }
+  #badges{ gap:3px; }
+  #badges .cwd{ display:flex; align-items:center; gap:3px; margin-left:3px; font:10px ui-monospace,Menlo,monospace; color:var(--muted); white-space:nowrap; }
+  #cockpit{ gap:6px; }
+  #cockpit .ctx{ display:flex; align-items:center; gap:2px; }
+  .cknum{ font:600 10px ui-monospace,Menlo,monospace; color:var(--muted); white-space:nowrap; }
+  .cknum.warn{ color:var(--run); } .cknum.crit{ color:var(--bad); }
+  #cockpit .ann{ display:grid; grid-template-columns:repeat(4,15px); grid-template-rows:11px 11px; gap:1px; padding:2px; border:1px solid var(--rule); border-radius:5px; background:#0a101c; }
+  #cockpit .ann span{ display:flex; align-items:center; justify-content:center; border-radius:2px; font:700 7.5px/1 ui-monospace,Menlo,monospace; color:#2d3d5c; background:#0f1828; }
+  #cockpit .ann span.on{ color:#6a80a5; }
+  #cockpit .ann span.lit{ background:#3a2a0a; color:var(--run); box-shadow:0 0 5px rgba(255,196,107,.35); }
+  #cockpit .ann span.red{ background:#3d1410; color:#ff8a7e; box-shadow:0 0 5px rgba(255,107,94,.4); }
+  #gauge .ring.stale, #mem .ram.stale{ opacity:.55; }
+  #gauge .ring, #mem .ram{ display:flex; }
+  header.cockpit #gauge, header.cockpit #mem{ padding-left:6px; border-left:1px solid var(--rule); }
+  .ckbob{ animation:ckbob 1.6s ease-in-out infinite; } @keyframes ckbob{ 50%{ transform:translateY(-1.5px); } }
+  @media (prefers-reduced-motion:reduce){ .ckbob{ animation:none; } }
 
   /* ---------- 3-column session view (explorer | file | claude) ---------- */
   #cols{ flex:1 1 auto; min-height:0; display:none; }
@@ -614,7 +647,11 @@
     #gauge button{ padding:0 3px; }
     #mem .bar{ width:26px; }
     #mem .rss{ display:none; }
+    header.cockpit #dash{ flex:1 1 100%; justify-content:space-between; }
+    header.cockpit #pv, #badges .cwd{ display:none; }
+    header.cockpit #stat-txt{ max-width:76px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   }
+  header.tworow.cockpit #dash{ flex:1 1 100%; justify-content:flex-start; }
   /* ---------- 🎙 dictation: a full-screen view (rolling chunks × several engines, merged with the vocabulary) ---------- */
   #dict{ --dbg:#0b0e12; --dpanel:#131920; --dline:#243041; --dink:#e6edf3; --ddim:#8593a3;
     --drun:#f0b429; --dok:#3fb950; --dbad:#f85149; --dacc:#58a6ff;
@@ -691,9 +728,10 @@
     <button id="back" style="display:none">‹</button>
     <img id="hdr-icon" alt="">
     <b id="hdr-title">✈ airport</b>
+    <span id="badges"></span>
     <span class="sub" id="hdr-sub">claude sessions, cleared for takeoff</span>
     <span class="hbreak"></span>
-    <span id="dash" class="off"><span id="mem"></span><span id="gauge"></span></span>
+    <span id="dash" class="off"><span id="cockpit"></span><span id="gauge"></span><span id="mem"></span></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span><span id="pv" title="page version: the tower stamps this when it serves the page; compare with what a plane says is live"></span></span>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="filesbtn" style="display:none" title="this plane's files">📁</button>
@@ -1063,8 +1101,9 @@ setInterval(() => {
   if (!s.running) return;
   const ft = feedEl.querySelector(".flytime");
   if (ft) ft.textContent = "✈ " + fmtFly(Date.now() - (s.startedAt || Date.now()));
-  $("stat-txt").textContent = "flying " + fmtFly(Date.now() - (s.startedAt || Date.now()));
+  $("stat-txt").textContent = flyStat(s);
 }, 1000);
+function flyStat(s){ return (innerWidth <= 600 && $("hdr").classList.contains("cockpit") ? "" : "flying ") + fmtFly(Date.now() - (s.startedAt || Date.now())); }
 
 // page self-reload: the shelf carries pageVersion = hash of airport.html on the
 // tower's disk; when it stops matching the stamp in THIS page, pull the new one.
@@ -1109,6 +1148,125 @@ function render(){
   if (view && !sessions()[view]) view = null; // deleted under us
   renderGauge();
   view ? renderSession() : renderTarmac();
+}
+
+// ---------- 🛩 the cockpit's glyphs: small inline SVGs (see the CSS block "the cockpit") ----------
+const ckF = (x) => +x.toFixed(2);
+function ckPt(cx, cy, r, a){ const t = (a - 90) * Math.PI / 180; return [ckF(cx + r * Math.cos(t)), ckF(cy + r * Math.sin(t))]; }
+function ckArc(cx, cy, r, a0, a1){ if (a1 - a0 >= 359.9) a1 = a0 + 359.9; const [x0, y0] = ckPt(cx, cy, r, a0), [x1, y1] = ckPt(cx, cy, r, a1); return `M${x0} ${y0}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}`; }
+const ckSvg = (w, h, vb, inner) => `<svg class="ck" width="${w}" height="${h}" viewBox="${vb}">${inner}</svg>`;
+const ckSev = (pct) => pct >= 90 ? "crit" : pct >= 75 ? "warn" : "";      // same thresholds as useCls
+const CK_COL = { warn: "var(--run)", crit: "var(--bad)" };
+const CK_TRACK = "#33486e";
+function ckBadge(sev, x, y, sz){   // ▲ warn · ■ critical, so severity never rests on colour alone
+  if (sev === "warn") return `<path d="M${x} ${y - sz * .62}L${x + sz * .6} ${y + sz * .42}L${x - sz * .6} ${y + sz * .42}Z" fill="var(--run)" stroke="#0b1220" stroke-width="1"/>`;
+  if (sev === "crit") return `<rect x="${x - sz / 2}" y="${y - sz / 2}" width="${sz}" height="${sz}" fill="var(--bad)" stroke="#0b1220" stroke-width="1"/>`;
+  return "";
+}
+const ckSetHTML = (el, h) => { if (el._ck !== h) { el._ck = h; el.innerHTML = h; } };  // no churn → no restarted animations, no refits
+// model badge: the family sets the shape AND the colour (fable ⬢, opus ●, sonnet ◆, haiku ▲), the major version inside
+function ckModel(model, sz = 18){
+  const parts = String(model).replace("claude-", "").split("-"), fam = parts[0], L = (fam[0] || "?").toUpperCase() + (/^\d+$/.test(parts[1] || "") ? parts[1] : "");
+  const C = { fable: "#b78cff", opus: "#e8a13c", sonnet: "#6aa8ff", haiku: "#74d4b4" }[fam] || "#8fa5c0";
+  const sh = { fable: `<path d="M10 1L18 5.5V14.5L10 19L2 14.5V5.5Z"/>`, opus: `<circle cx="10" cy="10" r="9"/>`, sonnet: `<path d="M10 .5L19.5 10L10 19.5L.5 10Z"/>`,
+    haiku: `<path d="M10 1L19.5 18H.5Z"/>` }[fam] || `<rect x="1" y="1" width="18" height="18" rx="4"/>`;
+  return ckSvg(sz, sz, "0 0 20 20", `<g fill="${C}">${sh}</g><text x="10" y="${fam === "haiku" ? 15.5 : 13.6}" text-anchor="middle" font-size="${L.length > 2 ? 7.5 : 9.5}" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="#0b1220">${esc(L)}</text>`);
+}
+// token coin in the account's colour: dashed + hollow = auto (the tower picks), solid + pin = pinned
+function ckCoin(n, pinned, sz = 17){
+  const C = String(n) === "2" ? "#ff8fd0" : String(n) === "1" ? "#5fb8ff" : "#8fa5c0", t = esc(String(n));
+  return pinned
+    ? ckSvg(sz, sz, "0 0 20 20", `<circle cx="10" cy="10" r="8.6" fill="${C}"/><text x="10" y="13.6" text-anchor="middle" font-size="10" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="#0b1220">${t}</text><circle cx="16.5" cy="3.5" r="2.6" fill="var(--ink)" stroke="#0b1220"/>`)
+    : ckSvg(sz, sz, "0 0 20 20", `<circle cx="10" cy="10" r="8.4" fill="none" stroke="${C}" stroke-width="1.6" stroke-dasharray="3 2"/><text x="10" y="13.6" text-anchor="middle" font-size="10" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="${C}">${t}</text>`);
+}
+function ckFolder(sz = 14){ return ckSvg(sz, sz, "0 0 20 20", `<path d="M2 5.5a1.5 1.5 0 0 1 1.5-1.5h4l2 2h7a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 15.5z" fill="none" stroke="var(--muted)" stroke-width="1.5"/>`); }
+function ckHost(up, sz = 16){
+  const c = up ? "var(--muted)" : "var(--bad)", d = up ? "" : ` stroke-dasharray="2 1.5"`, led = (y) => `<circle cx="5.5" cy="${y}" r="1.3" fill="${up ? "var(--hot)" : "none"}" stroke="${up ? "none" : c}"/>`;
+  return ckSvg(sz, sz, "0 0 20 20", `<rect x="2" y="3" width="16" height="6" rx="1.6" fill="none" stroke="${c}" stroke-width="1.5"${d}/><rect x="2" y="11" width="16" height="6" rx="1.6" fill="none" stroke="${c}" stroke-width="1.5"${d}/>${led(6)}${led(14)}` + (up ? "" : `<path d="M1 19L19 1" stroke="var(--bad)" stroke-width="2"/>`));
+}
+// cache heat: a plane while flying; a flame that BURNS DOWN over the hot hour (filled part = warm time left); a snowflake when cold
+function ckHeat(s, sz = 18, uid = "h"){
+  if (s.running) return `<span class="ckbob" style="display:flex">` + ckSvg(sz, sz, "0 0 20 20", `<path d="M10 1.2c.9 0 1.4 1 1.4 2.2v4.3l7 4.2v1.8l-7-2.1v4.1l2 1.5v1.4L10 17.8l-3.4.8v-1.4l2-1.5v-4.1l-7 2.1v-1.8l7-4.2V3.4c0-1.2.5-2.2 1.4-2.2z" fill="var(--run)" transform="rotate(45 10 10)"/>`) + `</span>`;
+  if (!isHot(s)) return ckSvg(sz, sz, "0 0 20 20", `<g stroke="#9cc2e6" stroke-width="1.5" stroke-linecap="round" fill="none"><path d="M10 2v16M3.1 6l13.8 8M3.1 14l13.8-8"/><path d="M8 3.5l2 1.6 2-1.6M8 16.5l2-1.6 2 1.6"/></g>`);
+  const span = Math.max(1, s.hotUntil - s.lastRunEndedAt), left = Math.max(0, Math.min(1, (s.hotUntil - Date.now()) / span));
+  const top = ckF(19 - 17 * Math.round(left * 20) / 20), fl = "M10 1.5c1.5 3.5 6 5.6 6 11a6 6 0 0 1-12 0c0-2.6 1.5-4 2.6-5.6.5 1.5 1.3 2.4 2.4 2.6-.4-3 .1-5.5 1-8z";
+  return ckSvg(sz, sz, "0 0 20 20", `<clipPath id="ckfl-${uid}"><rect x="0" y="${top}" width="20" height="20"/></clipPath><path d="${fl}" fill="none" stroke="#ff9d5c" stroke-opacity=".55" stroke-width="1.3"/><path d="${fl}" fill="#ff9d5c" clip-path="url(#ckfl-${uid})"/>`);
+}
+function ckHeatTxt(s){
+  if (s.running) return "flying " + fmtFly(Date.now() - (s.startedAt || Date.now()));
+  if (!isHot(s)) return "cold: the next turn re-reads the whole history";
+  return `hot: landed ${ago(s.lastRunEndedAt)} ago, warm ${Math.max(1, Math.round((s.hotUntil - Date.now()) / 60000))}m more`;
+}
+// context: a fuel gauge, needle on 0 → the model's window
+const ckCtxMax = (model) => /haiku/.test(model || "") ? 200e3 : 1e6;
+function ckCtx(n, max, w = 28){
+  const f = Math.max(0, Math.min(1, (n || 0) / max)), sev = ckSev(f * 100), a = -90 + 180 * f, [nx, ny] = ckPt(14, 14, 10, a);
+  return ckSvg(w, ckF(w * 18 / 28), "0 0 28 18", `<path d="${ckArc(14, 14, 11, -90, 90)}" fill="none" stroke="${CK_TRACK}" stroke-width="3" stroke-linecap="round"/>` +
+    (f > .005 ? `<path d="${ckArc(14, 14, 11, -90, a)}" fill="none" stroke="${CK_COL[sev] || "var(--hot)"}" stroke-width="3" stroke-linecap="round"/>` : "") +
+    `<path d="M14 14L${nx} ${ny}" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round"/><circle cx="14" cy="14" r="2" fill="var(--ink)"/>` + ckBadge(sev, 25, 4, 5.5));
+}
+// a usage ring: arc = used; the white notch = how far through the window we are (an arc past its notch = ahead of pace).
+// o = { lab, col, outer:{pct, el}, inner:{pct, el} | null, stale, err, title }; t1's inner ring is its 5h window
+function ckRing(o, sz = 24){
+  const dash = o.stale ? ` stroke-dasharray="2.2 1.8"` : "";
+  const one = (w, r, sw) => {
+    if (!w) return "";
+    let p = `<circle cx="12" cy="12" r="${r}" fill="none" stroke="${CK_TRACK}" stroke-width="${sw}"${dash}/>`;
+    if (w.pct >= .5) p += `<path d="${ckArc(12, 12, r, 0, 3.6 * Math.min(100, w.pct))}" fill="none" stroke="${CK_COL[ckSev(w.pct)] || o.col}" stroke-width="${sw}"/>`;
+    if (w.el != null) { const [x0, y0] = ckPt(12, 12, r - sw / 2 - .6, 3.6 * w.el), [x1, y1] = ckPt(12, 12, r + sw / 2 + .6, 3.6 * w.el); p += `<path d="M${x0} ${y0}L${x1} ${y1}" stroke="#e8f0fb" stroke-width="1.2"/>`; }
+    return p;
+  };
+  let inner, sev = "";
+  if (o.err) inner = `<circle cx="12" cy="12" r="10" fill="none" stroke="var(--bad)" stroke-width="2.6" stroke-dasharray="2.2 1.8"/><path d="M8.5 8.5l7 7m0-7l-7 7" stroke="var(--bad)" stroke-width="2.2"/>`;
+  else {
+    inner = one(o.outer, 10, 2.8) + one(o.inner, 6, 2.4) +
+      `<text x="12" y="${o.inner ? 14.3 : 15}" text-anchor="middle" font-size="${o.inner ? 6.5 : 8.5}" font-weight="800" font-family="ui-monospace,Menlo,monospace" fill="${o.col}">${esc(o.lab)}</text>`;
+    for (const w of [o.outer, o.inner]) if (w) { const v = ckSev(w.pct); if (v === "crit" || (v === "warn" && sev !== "crit")) sev = v; }
+  }
+  return `<span class="ring${o.stale ? " stale" : ""}" title="${esc(o.title || "")}">` + ckSvg(sz, sz, "0 0 24 24", inner + ckBadge(sev, 21.5, 2.5, 6.5)) + `</span>`;
+}
+// RAM stick: fill = memory used; the thin rail under it = swap (▲ at 80% or swap ≥ 50%, ■ at 90%; dashed when stale)
+function ckRam(pct, spct, stale, w = 26){
+  const sev = pct >= 90 ? "crit" : pct >= 80 || spct >= 50 ? "warn" : "", sc = spct >= 50 ? "var(--run)" : "var(--tmr)";
+  return ckSvg(w, ckF(w * 16 / 26), "0 0 26 16", `<rect x=".75" y=".75" width="24.5" height="10" rx="1.6" fill="none" stroke="var(--muted)" stroke-width="1.2"${stale ? ` stroke-dasharray="2 1.5"` : ""}/>` +
+    `<rect x="2.3" y="2.3" width="${ckF(21.4 * Math.min(100, pct) / 100)}" height="6.9" rx=".8" fill="${CK_COL[sev] || "var(--hot)"}"/><rect x="12" y="9" width="2" height="2.5" fill="#0b1220"/>` +
+    `<rect x="1" y="13" width="24" height="2.4" rx="1.2" fill="${CK_TRACK}"/>` + (spct > 0 ? `<rect x="1" y="13" width="${ckF(24 * Math.min(100, spct) / 100)}" height="2.4" rx="1.2" fill="${sc}"/>` : "") + ckBadge(sev, 24, 1.5, 6));
+}
+// the three context-in lights: ■ CLAUDE.md · ● memory · ★ skills — filled = on, hollow + slash = off
+function ckLights(s, sz = 10){
+  const one = (on, shape, warn) => { const c = on ? "var(--hot)" : warn ? "var(--run)" : "var(--dim)";
+    const sh = { sq: `<rect x="2" y="2" width="12" height="12" rx="2"/>`, ci: `<circle cx="8" cy="8" r="6.4"/>`, st: `<path d="M8 .8l2.1 4.5 4.9.6-3.6 3.4.9 4.9L8 11.8l-4.3 2.4.9-4.9L1 5.9l4.9-.6z"/>` }[shape];
+    return ckSvg(sz, sz, "0 0 16 16", `<g fill="${on ? c : "none"}" stroke="${c}" stroke-width="1.6">${sh}</g>` + (on ? "" : `<path d="M1 15L15 1" stroke="${c}" stroke-width="1.6"/>`)); };
+  return `<span style="display:inline-flex;gap:2px">${one(!!s.useClaudeMd, "sq", false)}${one(s.useMemory !== false, "ci", true)}${one(s.useSkills !== false, "st", true)}</span>`;
+}
+// are the usage readings stale or failing? (the PR lamp)
+function ckProbeTrouble(){
+  const u = (doc[0] && doc[0].usage) || {};
+  return Object.values(u).some((a) => a && (a.err || !a.at || Date.now() - a.at > 25 * 60_000));
+}
+function renderCockpit(s){
+  const model = s.model || "claude-fable-5", tok = s.lastToken || s.token, max = ckCtxMax(model), cs = ckSev((s.totalTokens || 0) / max * 100);
+  const off = !hostUp(s.host), ind = Number(s.indent) || 0, cwd = String(s.cwd || "?");
+  ckSetHTML($("badges"), ckModel(model) + (tok ? ckCoin(tok, !!s.token) : "") +
+    `<span class="cwd">${ckFolder()}${esc(cwd.split("/").filter(Boolean).pop() || cwd)}</span>`);
+  $("badges").title = `${model.replace("claude-", "")}${tok ? ` · token t${tok} (${s.token ? "pinned" : "auto"})` : ""} · ${cwd}`;
+  const lamp = (txt, cls, title) => `<span class="${cls}" title="${esc(title)}">${txt}</span>`;
+  const ann = lamp("H", off ? "red" : "", `airfield ${s.host || "?"} ${off ? "OFFLINE" : "online"}`) +
+    lamp("ED", s.dirty ? "lit" : "", s.dirty ? "history edited: the next turn rebuilds it" : "history not edited") +
+    lamp(ind ? "⇥" + ind : "⇥", ind ? "lit" : "", ind ? "detour depth " + ind : "no detour") +
+    lamp(s.systemPrompt ? (s.systemMode === "replace" ? "S⇄" : "S+") : "S", s.systemPrompt ? (s.systemMode === "replace" ? "lit" : "on") : "", s.systemPrompt ? (s.systemMode === "replace" ? "system prompt REPLACES Claude Code's" : "system prompt appended") : "no system prompt") +
+    lamp("MD", s.useClaudeMd ? "on" : "", "CLAUDE.md " + (s.useClaudeMd ? "on" : "off")) +
+    lamp("MM", s.useMemory === false ? "lit" : "", "memory " + (s.useMemory === false ? "OFF" : "on")) +
+    lamp("SK", s.useSkills === false ? "lit" : "", "skills " + (s.useSkills === false ? "OFF" : "on")) +
+    lamp("PR", ckProbeTrouble() ? "lit" : "", ckProbeTrouble() ? "usage probes stale or failing" : "usage probes fresh");
+  ckSetHTML($("cockpit"), `<span class="ctx" title="context ${fmtTok(s.totalTokens)} of ${fmtTok(max)}">${ckCtx(s.totalTokens, max)}<span class="cknum ${cs}">${fmtTok(s.totalTokens)}</span></span>` +
+    `<span style="display:flex" title="${esc(ckHeatTxt(s))}">${ckHeat(s)}</span><span class="ann">${ann}</span>`);
+  $("hdr").classList.add("cockpit");
+}
+function cockpitOff(){
+  $("hdr").classList.remove("cockpit");
+  ckSetHTML($("badges"), ""); ckSetHTML($("cockpit"), "");
+  if (tipFor === "plane") hideGaugeTip();
 }
 
 // ---------- allowance gauge (per subscription account; tower polls the headers) ----------
@@ -1162,38 +1320,39 @@ function renderGauge(){
   const g = $("gauge");
   const u = (doc[0] && doc[0].usage) || {};
   const keys = Object.keys(u).sort();
-  if (!keys.length && !codexUsage()) { g.innerHTML = ""; hideGaugeTip(); return; }
-  const newest = Math.max(0, ...keys.map((k) => (u[k] || {}).at || 0));
+  const c = codexUsage();
+  if (!keys.length && !c) { ckSetHTML(g, ""); hideGaugeTip(); return; }
   const sig = keys.map((k) => (u[k] || {}).at).join(",");
   if (sig !== usageSig) { usageSig = sig; clearTimeout(usageProbeT); usageProbeT = null; } // a probe landed → ↻ settles
-  const rows = keys.map((k) => {
-    const a = u[k] || {};
-    const stale = !a.at || Date.now() - a.at > 25 * 60_000;
-    const open = `<span class="tok${stale ? " stale" : ""}"><span class="tn tk${esc(k)}">t${esc(k)}</span>`;
-    if (a.err) return open + `<span class="dial crit" title="${esc(String(a.err))}">probe failed</span></span>`;
-    const bk = usageBuckets(a), present = LIMIT_BUCKETS.filter(([b]) => bk[b]), lastK = present.length ? present[present.length - 1][0] : null;
-    const cells = [];
-    for (const [b, lab] of present) {
-      const x = bk[b], pct = Math.round(x.util * 100), cls = useCls(pct);
-      const sec = b !== "5h" && present[0][0] !== b && (b === "7d" || !bk["7d"]) ? " sec" : "";
-      const title = `${lab}${b === "7d_oi" ? " (API bucket 7d_oi — fable weekly)" : ""} · ${pct}% used · resets ${esc(fmtReset(x.reset))}${x.status && x.status !== "allowed" ? " · " + esc(x.status) : ""}`;
-      const use = `<span class="bar use${cls}${b === lastK || b === "5h" ? "" : sec}" title="${title}"><i style="width:${Math.min(100, pct)}%"></i></span>`;
-      let stack = use;
-      if (b === "5h") stack = `<span class="bstack">${use}${timeBar("5h", x.reset, "5-hour")}</span>`;
-      else if (b === lastK) stack = `<span class="bstack${sec}">${use}${timeBar("7d", (bk["7d"] || {}).reset || (bk["7d_oi"] || {}).reset, "7-day")}</span>`;
-      cells.push(`<span class="lb${cls}${sec}" title="${title}">${lab}</span>${stack}`);
-    }
-    return open + `<span class="lgrid">${cells.join("")}</span></span>`;
-  }).join("");
-  g.innerHTML = rows + codexRow() + `<span class="asof" title="last probe">${newest ? ago(newest) : ""}</span>` +
-    `<button id="limref" title="probe both tokens now (one 1-token call each; at most one probe per 90 s)"${usageProbeT ? " disabled" : ""}>${usageProbeT ? "…" : "↻"}</button>`;
-  $("limref").addEventListener("click", (e) => {
-    e.stopPropagation();
-    send({ type: "usage-probe" });
-    clearTimeout(usageProbeT); usageProbeT = setTimeout(() => { usageProbeT = null; renderGauge(); }, 20000);
-    renderGauge();
+  const now = Date.now(), elOf = (win, reset) => reset ? Math.round(Math.max(0, Math.min(1, 1 - (reset - now) / LIMIT_WIN[win])) * 100) : null;
+  const col = { "1": "#5fb8ff", "2": "#ff8fd0" };
+  // one ring per account: the outer arc = its weekly window (the fuller of 7d / f7d), the inner arc = its 5h window if it has one
+  const rings = keys.map((k) => {
+    const a = u[k] || {}, stale = !a.at || now - a.at > 25 * 60_000;
+    if (a.err) return ckRing({ lab: k, col: col[k] || "var(--muted)", err: true, stale, title: `t${k}: probe failed · ${a.err}` });
+    const bk = usageBuckets(a), weekReset = (bk["7d"] || bk["7d_oi"] || {}).reset;
+    const wk = ["7d", "7d_oi"].filter((b) => bk[b]).map((b) => bk[b].util * 100);
+    const outer = wk.length ? { pct: Math.max(...wk), el: elOf("7d", weekReset) } : null;
+    const five = bk["5h"] ? { pct: bk["5h"].util * 100, el: elOf("5h", bk["5h"].reset) } : null;
+    const title = `t${k} · ` + LIMIT_BUCKETS.filter(([b]) => bk[b]).map(([b, lab]) => `${lab} ${Math.round(bk[b].util * 100)}%`).join(" · ") + (stale ? ` · probed ${a.at ? ago(a.at) + " ago" : "never"}` : "");
+    return ckRing({ lab: k, col: col[k] || "var(--muted)", outer: outer || five, inner: outer ? five : null, stale, title });
   });
-  if ($("gaugetip").classList.contains("on") && tipFor === "gauge") fillGaugeTip();  // live refresh while hovered
+  if (c && c.windows && c.windows.length) {
+    const ws = c.windows.map((w) => ({ min: w.min, pct: w.reset && w.reset < now ? 0 : Number(w.used) || 0, reset: w.reset }));
+    const five = ws.find((w) => w.min <= 300), wk = ws.filter((w) => w.min > 300);
+    const top = wk.length ? wk.reduce((x, y) => (y.pct > x.pct ? y : x)) : null;
+    const ring = (w) => w && { pct: w.pct, el: w.reset && w.reset > now ? elOf(w.min <= 300 ? "5h" : "7d", w.reset) : null };
+    rings.push(ckRing({ lab: "G", col: "#74d4b4", outer: ring(top || five), inner: top ? ring(five) : null, stale: now - (c.at || 0) > 6 * 3600e3,
+      title: `gpt (OpenAI) · ` + ws.map((w) => `${winLab(w.min)} ${Math.round(w.pct)}%`).join(" · ") + ` · as of ${ago(c.at)} ago` }));
+  }
+  ckSetHTML(g, rings.join(""));
+  if ($("gaugetip").classList.contains("on") && tipFor === "gauge") fillGaugeTip();  // live refresh while open
+}
+function probeNow(){   // ↻ in the usage card: probe both tokens now (one 1-token call each; at most one probe per 90 s)
+  if (usageProbeT) return;
+  send({ type: "usage-probe" });
+  usageProbeT = setTimeout(() => { usageProbeT = null; renderGauge(); }, 20000);
+  if (tipFor === "gauge") fillGaugeTip();
 }
 
 // ---------- box meter: RAM · swap · ✻ claude processes ----------
@@ -1211,15 +1370,16 @@ function renderMem(d){
   el.classList.toggle("stale", Date.now() - (d.at || 0) > 45_000);
   if ($("gaugetip").classList.contains("on") && tipFor === "mem") fillMemTip();   // live refresh while open
   el.title = "";   // the hover/tap card (fillMemTip) has the details now
-  el.innerHTML = `<span class="mgrid"><span class="lb${cls}">mem</span><span class="bar${cls}"><i style="width:${pct}%"></i></span><span class="v${cls}">${pct}%</span>` +
-    (d.swapTotal ? `<span class="lb${scls} sw">swap</span><span class="bar${scls} sw"><i style="width:${spct}%"></i></span><span class="v${scls} sw">${spct}%</span>` : "") + `</span>` +
+  const stale = Date.now() - (d.at || 0) > 45_000, msev = pct >= 90 ? "crit" : pct >= 80 || spct >= 50 ? "warn" : "";
+  ckSetHTML(el, `<span class="ram${stale ? " stale" : ""}">${ckRam(pct, spct, stale)}</span>` + (msev ? `<span class="cknum ${msev}">${pct}%</span>` : "") +
     `<span class="cl">✻${cl.n}</span><span class="rss">${fmtB(cl.rss)}</span>` +
-    (cx.n ? `<span class="cl">☀${cx.n}</span><span class="rss">${fmtB(cx.rss)}</span>` : "");
+    (cx.n ? `<span class="cl">☀${cx.n}</span><span class="rss">${fmtB(cx.rss)}</span>` : ""));
 }
 setInterval(() => renderMem(), 15000); // greys out if the tower stops pushing
 
 // #dash shows once either meter has content (see the #dash.off CSS for why this isn't :has(:empty))
-function syncDash(){ $("dash").classList.toggle("off", !$("mem").firstChild && !$("gauge").firstChild); }
+function syncDash(){ $("dash").classList.toggle("off", !$("mem").firstChild && !$("gauge").firstChild && !$("cockpit").firstChild); }
+new MutationObserver(syncDash).observe($("cockpit"), { childList: true });
 new MutationObserver(syncDash).observe($("mem"), { childList: true });
 new MutationObserver(syncDash).observe($("gauge"), { childList: true });
 syncDash();
@@ -1268,6 +1428,9 @@ function fillGaugeTip(){
     rows.push(`<div class="meta">read from codex's own logs at its last run (never probed)${c.reached ? " · limit reached: " + esc(c.reached) : ""}</div>`);
     blocks.push(rows.join(""));
   }
+  const newest = Math.max(0, ...Object.values(u).map((a) => (a && a.at) || 0));
+  blocks.push(`<div class="meta">white notch on a ring = how far through its window we are; t1's inner ring is its 5h window</div>` +
+    `<div style="margin-top:4px"><button id="limref"${usageProbeT ? " disabled" : ""}>${usageProbeT ? "probing…" : "↻ probe now"}</button> <span class="meta">${newest ? "last probe " + ago(newest) + " ago" : ""}</span></div>`);
   tip.innerHTML = blocks.join("<hr>");
   const r = $("gauge").getBoundingClientRect();
   tip.style.top = (r.bottom + 6) + "px";
@@ -1275,7 +1438,7 @@ function fillGaugeTip(){
   tip.style.left = "auto";
 }
 let tipFor = null;   // which meter the shared hover card (#gaugetip) is showing: "gauge" | "mem"
-function showGaugeTip(){ if (!Object.keys((doc[0] && doc[0].usage) || {}).length) return; tipFor = "gauge"; fillGaugeTip(); $("gaugetip").classList.add("on"); }
+function showGaugeTip(){ clearTimeout(tipHideT); if (!Object.keys((doc[0] && doc[0].usage) || {}).length) return; tipFor = "gauge"; fillGaugeTip(); $("gaugetip").classList.add("on"); }
 // the memory card: RAM · swap · the biggest processes on the box, named by folder (a plane's own name when it's a plane's cwd)
 function fillMemTip(){
   const d = memLast, tip = $("gaugetip");
@@ -1303,14 +1466,50 @@ function fillMemTip(){
   tip.style.right = Math.max(8, window.innerWidth - r.right - 4) + "px";
   tip.style.left = "auto";
 }
-function showMemTip(){ if (!memLast) return; tipFor = "mem"; fillMemTip(); $("gaugetip").classList.add("on"); }
+function showMemTip(){ clearTimeout(tipHideT); if (!memLast) return; tipFor = "mem"; fillMemTip(); $("gaugetip").classList.add("on"); }
+// the plane card: everything the old sub line said, one row per glyph (tap the cockpit instruments or the badges)
+let planeTipAnchor = "cockpit";
+function fillPlaneTip(){
+  const s = view && sess(view), tip = $("gaugetip");
+  if (!s || s.kind) return hideGaugeTip();
+  const model = s.model || "claude-fable-5", tok = s.lastToken || s.token, max = ckCtxMax(model), off = !hostUp(s.host), ind = Number(s.indent) || 0;
+  const row = (g, k, v) => `<div class="ckrow"><span class="ckg">${g}</span><span class="w">${k}</span><span class="v">${v}</span></div>`;
+  tip.innerHTML = `<div class="acctrow">${esc(s.title || view)}<span class="when">page ${esc(PAGE_VER.startsWith("__") ? "dev" : PAGE_VER.slice(0, 7))}</span></div>` +
+    row(ckHost(!off), "airfield", `${esc(s.host || "?")} ${off ? '<b style="color:var(--bad)">offline</b>' : "<small>online</small>"}`) +
+    row(ckFolder(16), "folder", esc(s.cwd || "?")) +
+    row(ckModel(model), "model", esc(model.replace("claude-", ""))) +
+    (tok ? row(ckCoin(tok, !!s.token), "token", `t${esc(String(tok))} <small>${s.token ? "pinned" : "auto: the tower picks"}</small>`) : "") +
+    row(ckHeat(s, 18, "tip"), "cache", esc(ckHeatTxt(s))) +
+    row(ckCtx(s.totalTokens, max), "context", `${fmtTok(s.totalTokens)} of ${fmtTok(max)} <small>${Math.round((s.totalTokens || 0) / max * 100)}%</small>`) +
+    row(`<span class="cknum">${s.systemPrompt ? (s.systemMode === "replace" ? "S⇄" : "S+") : "S"}</span>`, "sys prompt", s.systemPrompt ? (s.systemMode === "replace" ? "<b style='color:var(--run)'>replaces</b> Claude Code's" : "appended to Claude Code's") : "none") +
+    row(ckLights(s), "context in", `CLAUDE.md ${s.useClaudeMd ? "on" : "off"} · memory ${s.useMemory === false ? "<b style='color:var(--run)'>off</b>" : "on"} · skills ${s.useSkills === false ? "<b style='color:var(--run)'>off</b>" : "on"}`) +
+    (s.dirty ? row(`<span class="cknum warn">ED</span>`, "edited", "history edited: the next turn rebuilds it") : "") +
+    (ind ? row(`<span class="cknum warn">⇥${ind}</span>`, "detour", "depth " + ind) : "") +
+    `<hr><div class="meta">lamps: H airfield · ED edited · ⇥ detour · S system prompt · MD CLAUDE.md · MM memory · SK skills · PR usage probes. Dark = normal, lit = look.</div>`;
+  const r = $(planeTipAnchor).getBoundingClientRect();
+  tip.style.top = (r.bottom + 6) + "px";
+  tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - Math.min(330, window.innerWidth * .92) - 8)) + "px";
+  tip.style.right = "auto";
+}
+function showPlaneTip(anchor){ clearTimeout(tipHideT); planeTipAnchor = anchor; tipFor = "plane"; fillPlaneTip(); $("gaugetip").classList.add("on"); }
+for (const id of ["cockpit", "badges"]) {
+  $(id).addEventListener("mouseenter", () => showPlaneTip(id));
+  $(id).addEventListener("mouseleave", () => hideGaugeTipSoon());
+  $(id).addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") && tipFor === "plane" && planeTipAnchor === id ? hideGaugeTip() : showPlaneTip(id); });
+}
+// the card stays open while the pointer is on it (so ↻ in the usage card can be clicked); clicks inside don't close it
+let tipHideT = 0;
+function hideGaugeTipSoon(){ clearTimeout(tipHideT); tipHideT = setTimeout(hideGaugeTip, 250); }
+$("gaugetip").addEventListener("mouseenter", () => clearTimeout(tipHideT));
+$("gaugetip").addEventListener("mouseleave", hideGaugeTipSoon);
+$("gaugetip").addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest("#limref")) probeNow(); });
 $("mem").addEventListener("mouseenter", showMemTip);
-$("mem").addEventListener("mouseleave", hideGaugeTip);
+$("mem").addEventListener("mouseleave", hideGaugeTipSoon);
 $("mem").addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") && tipFor === "mem" ? hideGaugeTip() : showMemTip(); });  // touch
 function hideGaugeTip(){ $("gaugetip").classList.remove("on"); }
 $("gauge").addEventListener("mouseenter", showGaugeTip);
-$("gauge").addEventListener("mouseleave", hideGaugeTip);
-$("gauge").addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") ? hideGaugeTip() : showGaugeTip(); });  // touch fallback
+$("gauge").addEventListener("mouseleave", hideGaugeTipSoon);
+$("gauge").addEventListener("click", (e) => { e.stopPropagation(); $("gaugetip").classList.contains("on") && tipFor === "gauge" ? hideGaugeTip() : showGaugeTip(); });  // touch fallback
 document.addEventListener("click", hideGaugeTip);
 window.addEventListener("resize", hideGaugeTip);
 
@@ -1322,6 +1521,7 @@ const DISC = 0.125;            // disc side as a fraction of the apron side
 let APRON_S = 300;             // the apron's set side. Drag math MUST use this, not
                                // clientWidth (which excludes the border → release jump)
 function renderTarmac(){
+  cockpitOff();
   if (termOn || term) closeTerm();
   if (noteEd) destroyNote();
   hideEmber();
@@ -2002,7 +2202,9 @@ function renderSession(){
   ib.classList.toggle("act", ind > 0);
   ib.textContent = ind > 1 ? "⇥" + ind : "⇥";
   $("outdent").style.display = ind > 0 ? "block" : "none";
-  setStat(s.running ? "warn" : off ? "bad" : "ok", s.running ? "flying…" : off ? "airfield offline" : "live");
+  setStat(s.running ? "warn" : off ? "bad" : "ok", s.running ? "flying " + fmtFly(Date.now() - (s.startedAt || Date.now())) : off ? "offline" : "live");
+  renderCockpit(s);
+  if (s.running) $("stat-txt").textContent = flyStat(s);   // now that the cockpit class is set
   tarmacEl.classList.remove("on");
   colsEl.classList.add("on");
   const wide = wideMode(), pg = wide ? null : phonePage;
@@ -2052,6 +2254,7 @@ function hideEmber(){
   emberFor = null; emberConfirm = false;
 }
 function renderEmber(s){
+  cockpitOff();
   if (noteEd) destroyNote();
   $("notewrap").classList.remove("on");
   const em = s.em || {}, st = emberStatus(em);
@@ -2129,6 +2332,7 @@ function destroyNote(){
   if (nw) nw.classList.remove("on");
 }
 function renderNote(s){
+  cockpitOff();
   hideEmber();
   $("back").style.display = "block";
   $("hdr-icon").classList.remove("on");
