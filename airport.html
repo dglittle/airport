@@ -979,7 +979,7 @@ const PLANES = ["🛩","✈️","🛫","🛬","🚁","🛸","🚀","🎈"];
 function iconUrl(id, s){ return s && s.iconV ? BASE + "/icon/" + encodeURIComponent(id) + ".png?v=" + s.iconV : null; }
 function iconImg(id, s, cls){ const u = iconUrl(id, s); return u ? `<img class="${cls}" src="${esc(u)}" alt="" draggable="false" onerror="this.remove()">` : ""; }
 function emojiFor(id, s){ if (s.emoji) return s.emoji; let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PLANES[h % PLANES.length]; }
-const MODELS = ["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5"];
+const MODELS = ["claude-fable-5-2","claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5"];
 // a session pinned to a model that's no longer listed (retired, or set outside
 // the UI) keeps its own option — otherwise the select would silently show, and
 // on the next edit save, the wrong model
