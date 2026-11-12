@@ -723,7 +723,15 @@ function codexLimits() {
   } catch (_) {}
   return null;
 }
-const pushCodexUsage = () => { const d = codexLimits(); if (d) apply({ codexUsage: JSON.stringify(d) }); };   // never blank a known reading
+// codex may run on any machine: each ground crew reports its own machine's newest reading ({type:"codex"}), and the
+// tower reads its own; the NEWEST wins (never blank a known reading), tagged with the machine it came from
+function takeCodexUsage(d, host) {
+  if (!d || !d.at || !Array.isArray(d.windows)) return;
+  let cur = null; try { cur = JSON.parse(doc[0].codexUsage || "null"); } catch (_) {}
+  if (cur && (cur.at || 0) > d.at) return;
+  apply({ codexUsage: JSON.stringify(Object.assign({}, d, { host: host || cur && cur.host || null })) });
+}
+const pushCodexUsage = () => takeCodexUsage(codexLimits(), process.env.AIRPORT_HOST_NAME || os.hostname().split(".")[0]);
 setInterval(pushCodexUsage, 60_000).unref();
 setTimeout(pushCodexUsage, 2000);
 
@@ -1284,6 +1292,7 @@ wss.on("connection", (ws, req) => {
       });
       return;
     }
+    if (m.type === "codex" && ws._role === "host") { takeCodexUsage(m.data, ws._host); return; }
     if (m.type === "run-done" && ws._role === "host" && typeof m.session === "string") {
       const s = sess(m.session);
       if (!s) return;

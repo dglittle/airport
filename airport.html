@@ -1346,7 +1346,7 @@ function renderGauge(){
     const top = wk.length ? wk.reduce((x, y) => (y.pct > x.pct ? y : x)) : null;
     const ring = (w) => w && { pct: w.pct, el: w.reset && w.reset > now ? elOf(w.min <= 300 ? "5h" : "7d", w.reset) : null };
     rings.push(ckRing({ lab: "G", col: "#74d4b4", outer: ring(top || five), inner: top ? ring(five) : null, stale: now - (c.at || 0) > 6 * 3600e3,
-      title: `gpt (OpenAI) · ` + ws.map((w) => `${winLab(w.min)} ${Math.round(w.pct)}%`).join(" · ") + ` · as of ${ago(c.at)} ago` }));
+      title: `gpt (OpenAI) · ` + ws.map((w) => `${winLab(w.min)} ${Math.round(w.pct)}%`).join(" · ") + ` · as of ${ago(c.at)} ago` + (c.host ? ` (codex on ${c.host})` : "") }));
   }
   ckSetHTML(g, rings.join(""));
   if ($("gaugetip").classList.contains("on") && tipFor === "gauge") fillGaugeTip();  // live refresh while open
@@ -1426,7 +1426,7 @@ function fillGaugeTip(){
   }
   const c = codexUsage();
   if (c && c.windows && c.windows.length) {
-    const rows = [`<div class="acctrow"><span class="tkgpt">gpt</span> · OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""}<span class="when">as of ${esc(ago(c.at))} ago</span></div>`];
+    const rows = [`<div class="acctrow"><span class="tkgpt">gpt</span> · OpenAI${c.plan ? " (" + esc(c.plan) + ")" : ""}<span class="when">${c.host ? esc(c.host) + " · " : ""}as of ${esc(ago(c.at))} ago</span></div>`];
     for (const w of c.windows) { const gone = w.reset && w.reset < Date.now(), u = gone ? 0 : (w.used || 0) / 100;
       rows.push(`<div class="winrow"><span class="w">${esc(winLab(w.min))}</span> <span class="${sevCls(u)}">${tipBar(u)}</span> <span class="pct ${sevCls(u)}">${Math.round(u * 100)}%</span> <span class="rst">${gone ? "· reset since the reading" : w.reset ? "· resets " + untilTxt(w.reset) : ""}</span></div>`); }
     rows.push(`<div class="meta">read from codex's own logs at its last run (never probed)${c.reached ? " · limit reached: " + esc(c.reached) : ""}</div>`);

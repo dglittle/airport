@@ -593,6 +593,47 @@ function scheduleConnect(ms) { // single pending redial — parallel timers seed
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(connect, ms);
 }
+// ---- ◎ codex (OpenAI) limits on THIS machine: the same passive read as the tower's (codex logs its rate limits in its
+// session files); sent to the tower when it changes and on every reconnect. The tower keeps the newest across machines.
+const CODEX_SESS = path.join(os.homedir(), ".codex", "sessions");
+function codexLimits() {
+  try {
+    // newest day folders first (Y/M/D), as far back as it takes: codex may not have run for days
+    const ls = (d) => { try { return fs.readdirSync(d).sort().reverse(); } catch (_) { return []; } };
+    const files = [];
+    for (const y of ls(CODEX_SESS)) for (const m of ls(path.join(CODEX_SESS, y))) for (const dd of ls(path.join(CODEX_SESS, y, m))) {
+      if (files.length >= 40) break;
+      const dir = path.join(CODEX_SESS, y, m, dd);
+      const day = ls(dir).filter((n) => n.endsWith(".jsonl")).map((n) => { try { return { p: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }; } catch (_) { return null; } }).filter(Boolean);
+      files.push(...day.sort((a, b) => b.mtime - a.mtime));
+    }
+    for (const f of files.slice(0, 40)) {
+      const fd = fs.openSync(f.p, "r"), size = fs.fstatSync(fd).size, len = Math.min(size, 512 * 1024), buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len); fs.closeSync(fd);
+      const lines = buf.toString("utf8").split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"rate_limits"') || !lines[i].includes('"used_percent"')) continue;
+        let o; try { o = JSON.parse(lines[i]); } catch (_) { continue; }
+        const rl = o.payload && o.payload.rate_limits;
+        if (!rl || !rl.primary) continue;
+        const win = (w) => w && typeof w.used_percent === "number" ? { min: Number(w.window_minutes) || 0, used: w.used_percent, reset: (Number(w.resets_at) || 0) * 1000 || null } : null;
+        return { at: new Date(o.timestamp).getTime() || f.mtime, plan: rl.plan_type || null,
+          windows: [win(rl.primary), win(rl.secondary)].filter(Boolean).sort((x, y) => x.min - y.min),
+          reached: rl.rate_limit_reached_type || null };
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+let codexSent = "";
+function reportCodex() {
+  if (!towerWs || towerWs.readyState !== 1) return;
+  const d = codexLimits(), s = d ? JSON.stringify(d) : "";
+  if (!s || s === codexSent) return;
+  try { towerWs.send(JSON.stringify({ type: "codex", data: d })); codexSent = s; } catch (_) {}
+}
+setInterval(reportCodex, 60_000).unref();
+
 function connect() {
   if (connecting) return;
   if (towerWs && towerWs.readyState === 1) return; // already up — a second dial makes the
@@ -615,6 +656,7 @@ function connect() {
                 pendingDone: OUTBOX.filter((x) => x.type === "run-done" && x.session).map((x) => x.session) } }));
     } catch (_) {}
     flushOutbox(ws);
+    codexSent = ""; setTimeout(reportCodex, 2000);
     log("tower connected");
   });
   ws.addEventListener("message", (e) => {
