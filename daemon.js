@@ -83,7 +83,7 @@ function saveTokenIdx() { try { fs.writeFileSync(TOKEN_STATE, JSON.stringify({ i
 // CUMULATIVE over the whole transcript (verified 2.1.302), and subtracting the last
 // total breaks after trims/rebuilds. result.usage IS per-invocation (summed over all
 // of the turn's API calls — matches the CLI's own delta to 7 decimals), so the turn
-// costs usage × price. Table = the CLI's model catalog (pricing_tiers, 2.1.302),
+// costs usage × price. Table = the CLI's model catalog (pricing_tiers, 2.1.302; fable-5-2 from 2.1.322),
 // $/Mtok; same formula as the CLI (1h vs 5m writes from usage.cache_creation,
 // long_prompt tier, ×1.1 for inference_geo "us"). Unknown model → cost null.
 const PRICE_TIERS = {
@@ -95,6 +95,7 @@ const PRICE_TIERS = {
   tier_10_50:                 { input: 10,  output: 50,  w5: 12.5,  w1: 20,  read: 1 },
   tier_10_50_cache_read_0_25: { input: 10,  output: 50,  w5: 12.5,  w1: 20,  read: 0.25 },
   tier_4_20_cache_read_0_20:  { input: 4,   output: 20,  w5: 5,     w1: 8,   read: 0.2 },
+  tier_8_40_cache_read_0_20:  { input: 8,   output: 40,  w5: 10,    w1: 16,  read: 0.2 },
   haiku_35:                   { input: 0.8, output: 4,   w5: 1,     w1: 1.6, read: 0.08 },
   haiku_45:                   { input: 1,   output: 5,   w5: 1.25,  w1: 2,   read: 0.1 },
   haiku_55:                   { input: 0.1, output: 0.5, w5: 0.125, w1: 0.2, read: 0.01,
@@ -106,7 +107,7 @@ const MODEL_TIER = {
   "claude-sonnet-4-5": "tier_3_15", "claude-sonnet-4-6": "tier_3_15", "claude-sonnet-5": "tier_2_10", "claude-sonnet-5-5": "tier_2_10_cache_read_0_10",
   "claude-opus-4-0": "tier_15_75", "claude-opus-4": "tier_15_75", "claude-opus-4-1": "tier_15_75", "claude-opus-4-5": "tier_5_25",
   "claude-opus-4-6": "tier_5_25", "claude-opus-4-7": "tier_5_25", "claude-opus-4-8": "tier_5_25", "claude-opus-5": "tier_5_25",
-  "claude-opus-5-5": "tier_4_20_cache_read_0_20", "claude-fable-5": "tier_10_50", "claude-fable-5-1": "tier_10_50_cache_read_0_25",
+  "claude-opus-5-5": "tier_4_20_cache_read_0_20", "claude-fable-5": "tier_10_50", "claude-fable-5-1": "tier_10_50_cache_read_0_25", "claude-fable-5-2": "tier_8_40_cache_read_0_20",
   "claude-mythos-5": "tier_10_50", "claude-mythos-5-1": "tier_10_50_cache_read_0_25",
 };
 function priceFor(model) {

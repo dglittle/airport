@@ -1329,6 +1329,10 @@ wss.on("connection", (ws, req) => {
       // a failed one keeps it so the next ⚡ re-attempts the branch (never appends to the parent)
       if (s.forkNext) patch.forkNext = m.failed ? true : null;
       if (m.stats) {
+        // a model the ground crew can't price yet (newer than its price table) → the rise in the CLI's own running
+        // total for this same transcript is this turn's cost (exactly what the CLI charged)
+        if (m.stats.cost == null && m.stats.total > 0 && Number(s.costTotal) > 0 && m.stats.total > s.costTotal &&
+            (!m.claudeSessionId || m.claudeSessionId === s.claudeSessionId)) m.stats.cost = +(m.stats.total - s.costTotal).toFixed(7);
         patch.lastCost = m.stats.cost == null ? null : m.stats.cost; patch.lastMs = m.stats.ms || 0;
         if (m.stats.total) patch.costTotal = m.stats.total; // the CLI's running total for this transcript
         patch.totalTokens = m.stats.ctx || 0;
