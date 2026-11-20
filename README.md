@@ -39,7 +39,8 @@ sailing, auth, and two-account failover). Airport takes the best of both.
   and relays runs/interrupts/file-ops down to the right machine.
 - **Ground crew** (`daemon.js`) — one bare-bones daemon per machine. Dials OUT
   to the tower (laptops behind NAT need no inbound port), spawns
-  `claude -p --resume` turns, streams events back as box patches. Generic by
+  `claude -p --resume` turns, streams events back as box patches, and does
+  ✂ auto-trim on the transcripts it holds (`ctxtrim.js`). Generic by
   design: point it at a tower, give it a name, done.
 - **UI** (`airport.html`) — the tarmac. Served by the tower at `/`.
 
@@ -86,6 +87,38 @@ lists and scratch pads that should live where the work lives.
     earlier turns cached → warm resume (within the 1h TTL), and the remaining
     history keeps its real thinking + tool traffic. A ✂ box notes it; any
     doubt (ambiguous/missing prompt match) falls back to the ⟲ rebuild.
+- **✂ auto-trim** (the header's ✂). Shrinks a plane's REAL context, its
+  Claude Code transcript, by 10 / 25 / 50%, cheapest loss first. Deleting tool
+  boxes can't do this (they're a display mirror), and a ⟲ rebuild throws away
+  all tool traffic and thinking. The panel shows the context size, what it's
+  made of (tool results, tool-call inputs, thinking, text, reminders, system
+  prompt), and per choice what would go, the estimated new size and the cost
+  of the cold cache write the next turn pays. The ground crew holding the
+  transcript (`ctxtrim.js`, run by `daemon.js`) works through the hierarchy
+  and stops as soon as the target is reached:
+  1. truncate the biggest old tool results to head + tail, with
+     `[✂ trimmed N chars on <date> — airport auto-trim]` in between;
+  2. replace old tool results, oldest first, with
+     `[✂ removed: <tool> result, N chars on <date> …]`;
+  3. drop old thinking blocks, oldest first (they're signed, so all or nothing);
+  4. collapse long string fields in old tool calls' inputs.
+
+  Never touched: the last two turns (or the newest ~20% when one giant turn
+  is most of the context), every user and assistant text, reminders, the
+  system prompt. The file stays resumable: tool_use/tool_result ids stay
+  paired, thinking-only records are spliced out with their children
+  re-parented, every other line keeps its bytes, and it's rewritten
+  atomically under the same session id. The original stays next to it as
+  `<sid>.jsonl.pretrim-<stamp>` (the newest 3 are kept), and **↶ undo** in the
+  panel puts it back until the next turn runs (only if the file is still
+  exactly what the trim wrote). Trimmed items' boxes get a dashed ✂ mark (they
+  still show the original), a ✂ note box logs what was done, and the context
+  number shows `~estimate` until the next turn measures it. Refused while the
+  plane flies, when its history is edited (the next turn rebuilds anyway), or
+  before a fork's first turn. Sizes are estimates: per-kind weights measured
+  on claude-opus-5-5 (per char, a thinking signature costs ~⅕ of a tool
+  result), scaled to the plane's last measured context; real drops came in
+  within ~10% (833k → 388k measured for a 50% trim).
 - **Fork** (⑂) branches a session. When the parent is clean, it's a REAL fork:
   the first ⚡ runs `--resume <parent> --fork-session`, branching the actual
   transcript (tool results + thinking included) under a new session id — one
@@ -411,8 +444,9 @@ leaves localhost:
 WS to the tower: `{type:"auth", role:"browser"|"host", pass, host?, info?}` →
 `{type:"doc"}` then `{type:"delta"}` stream. Writers send
 `{type:"update", patch}` (unversioned; the tower is the single merge point).
-Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term` / `ember`.
-Daemons: `addbox` / `run-done` / `fs-res`. HTTP (curl-able, all POSTs take
+Browsers: `run` / `queue` / `pump` / `interrupt` / `addbox` / `fs` / `term` / `ember` /
+`ctxtrim {op: plan|apply|undo, frac}`.
+Daemons: `addbox` / `run-done` / `fs-res` / `ctxtrim-res`. HTTP (curl-able, all POSTs take
 `pass`): `POST /update`, `POST /run {id, text?}`, `POST /pump {id}`,
 `POST /wake {id}`, `POST /queue {id, text}`, `POST /ember {id, action}`,
 `POST /icon`, `POST /whisper`, `GET /dictate/vocab`, `POST /dictate/chunk`
@@ -437,13 +471,15 @@ The doc:
     state, running, startedAt,  // ready | processing | offline
     claudeSessionId, sidHost, dirty,
     trim,                       // pending ✂ tail-trim: {text: first zapped turn's prompt}
+    ctxTrim, ctxEst, ctxTrimming, // ✂ auto-trim: the last trim, undoable until a turn runs {at, backup, size, mtimeMs, before, keys…}
+                                //   · totalTokens is an estimate · a trim is in progress
     seenAt, lastRunEndedAt, hotUntil, turns, lastCost, lastMs, costTotal, totalTokens, lastError,
     token, lastToken,           // pinned account (1|2, absent = sticky failover) · the one it last flew on
     queueWait,                  // why a ⏭ queue is waiting / held
     pumpText,                   // ⛽ pump message (absent = not a pump plane)
     wakeEvery, wakeText, wakeGate, lastWakeAt, wakeWait, wakeArmed,   // ⏰ timer (wakeArmed = the interval its clock was started for)
     iconV,                      // 🖼 icon version (cache-buster)
-    messages: { m000001: { role, text, ts, synced, stats, depth } },
+    messages: { m000001: { role, text, ts, synced, stats, depth, trimmed } },   // trimmed = "✂ removed" etc.
 } } }
 ```
 
@@ -451,7 +487,8 @@ The doc:
 
 - Transcript synthesis uses Claude Code's **internal** jsonl format
   ([SYNTHETIC.md](SYNTHETIC.md)) — a CLI update can break it; re-verify on
-  upgrades (last verified 2.1.198–2.1.207).
+  upgrades (last verified 2.1.198–2.1.207). ✂ auto-trim edits the same
+  format in place (last verified 2.1.302).
 - The monaco editor and the terminal's xterm.js load from CDNs (needs internet
   in the browser). xterm is fetched + eval'd with `define` shadowed so its UMD
   build doesn't register into monaco's AMD loader.

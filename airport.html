@@ -354,6 +354,25 @@
   #termhost{ width:100%; height:100%; }
   #termhost .xterm{ height:100%; }
   header #termbtn.act{ border-color:var(--accent); color:var(--accent); }
+  header #trimbtn.act{ border-color:var(--accent); color:var(--accent); }
+  /* ✂ auto-trim: marks on trimmed boxes + the panel */
+  .chip.trimmed{ border-style:dashed; }
+  .turn .trm{ font:10px ui-monospace,Menlo,monospace; color:var(--accent); margin-left:6px; }
+  .trim .trow{ display:flex; align-items:center; gap:8px; font-size:12px; margin:3px 0; }
+  .trim .trow .k{ flex:0 0 46%; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trim .trow .v{ flex:0 0 44px; text-align:right; font-family:ui-monospace,Menlo,monospace; }
+  .trim .trow .b{ flex:1; height:6px; border-radius:3px; background:var(--panel2); overflow:hidden; }
+  .trim .trow .b i{ display:block; height:100%; background:var(--accent); opacity:.7; }
+  .trim .trow.keep .b i{ background:var(--muted); }
+  .trim .picks{ display:flex; gap:6px; margin-top:6px; }
+  .trim .picks button{ flex:1; background:var(--panel2); border:1px solid var(--rule); color:var(--ink); border-radius:9px; padding:7px 4px; cursor:pointer; font-size:13px; line-height:1.3; }
+  .trim .picks button small{ display:block; color:var(--dim); font-size:10px; }
+  .trim .picks button.on{ border-color:var(--accent); background:#2a210d; }
+  .trim ul{ margin:6px 0 0; padding-left:18px; font-size:12px; color:var(--muted); }
+  .trim .note{ font-size:11px; color:var(--muted); margin-top:8px; line-height:1.45; }
+  .trim .undo{ border:1px solid var(--rule); border-radius:10px; padding:8px 10px; margin-bottom:10px; font-size:12px; }
+  .trim .undo button{ background:var(--panel2); border:1px solid var(--accent); color:var(--accent); border-radius:7px; padding:3px 10px; cursor:pointer; font-size:12px; }
+  .trim .undo button:disabled{ opacity:.45; cursor:default; }
 
   /* ---------- 📝 note planes (a text file living in the shelf) ---------- */
   #notewrap{ flex:1 1 auto; min-height:0; display:none; flex-direction:column; }
@@ -733,6 +752,7 @@
     <span class="hbreak"></span>
     <span id="dash" class="off"><span id="cockpit"></span><span id="gauge"></span><span id="mem"></span></span>
     <span class="stat" id="stat"><span class="dot"></span><span id="stat-txt">…</span><span id="pv" title="page version: the tower stamps this when it serves the page; compare with what a plane says is live"></span></span>
+    <button id="trimbtn" style="display:none" title="✂ trim: shrink this plane's context">✂</button>
     <button id="termbtn" style="display:none" title="terminal at this session's cwd">&gt;_</button>
     <button id="filesbtn" style="display:none" title="this plane's files">📁</button>
     <button id="laybtn" style="display:none" title="toggle 1/3 columns">▦</button>
@@ -1072,7 +1092,7 @@ function connect(){
     }
     if (m.type === "auth-failed") { gated = true; try { ws.close(); } catch(_){} renderGate(); return; }
     if (m.type === "run-failed") { hint("✗ " + (m.error || "run failed")); render(); return; }
-    if (m.type === "fs-res") { const cb = fsReqs.get(m.reqId); fsReqs.delete(m.reqId); if (cb) cb(m); return; }
+    if (m.type === "fs-res" || m.type === "ctxtrim-res") { const cb = fsReqs.get(m.reqId); fsReqs.delete(m.reqId); if (cb) cb(m); return; }
     if (m.type === "term-data") { if (term && m.termId === termId) term.write(m.data); return; }
     if (m.type === "term-exit") {
       if (term && m.termId === termId) term.write("\r\n\x1b[90m[terminal closed" + (m.error ? ": " + m.error : "") + "]\x1b[0m\r\n");
@@ -1261,7 +1281,7 @@ function renderCockpit(s){
     lamp("MM", s.useMemory === false ? "lit" : "", "memory " + (s.useMemory === false ? "OFF" : "on")) +
     lamp("SK", s.useSkills === false ? "lit" : "", "skills " + (s.useSkills === false ? "OFF" : "on")) +
     lamp("PR", ckProbeTrouble() ? "lit" : "", ckProbeTrouble() ? "usage probes stale or failing" : "usage probes fresh");
-  ckSetHTML($("cockpit"), `<span class="ctx" title="context ${fmtTok(s.totalTokens)} of ${fmtTok(max)}">${ckCtx(s.totalTokens, max)}<span class="cknum ${cs}">${fmtTok(s.totalTokens)}</span></span>` +
+  ckSetHTML($("cockpit"), `<span class="ctx" title="context ${fmtTok(s.totalTokens)} of ${fmtTok(max)}">${ckCtx(s.totalTokens, max)}<span class="cknum ${cs}">${s.ctxEst ? "~" : ""}${fmtTok(s.totalTokens)}</span></span>` +
     `<span style="display:flex" title="${esc(ckHeatTxt(s))}">${ckHeat(s)}</span><span class="ann">${ann}</span>`);
   $("hdr").classList.add("cockpit");
 }
@@ -1484,7 +1504,7 @@ function fillPlaneTip(){
     row(ckModel(model), "model", esc(model.replace("claude-", ""))) +
     (tok ? row(ckCoin(tok, !!s.token), "token", `t${esc(String(tok))} <small>${s.token ? "pinned" : "auto: the tower picks"}</small>`) : "") +
     row(ckHeat(s, 18, "tip"), "cache", esc(ckHeatTxt(s))) +
-    row(ckCtx(s.totalTokens, max), "context", `${fmtTok(s.totalTokens)} of ${fmtTok(max)} <small>${Math.round((s.totalTokens || 0) / max * 100)}%</small>`) +
+    row(ckCtx(s.totalTokens, max), "context", `${s.ctxEst ? "~" : ""}${fmtTok(s.totalTokens)} of ${fmtTok(max)} <small>${Math.round((s.totalTokens || 0) / max * 100)}%${s.ctxEst ? " · estimated after ✂ trim" : ""}</small>`) +
     row(`<span class="cknum">${s.systemPrompt ? (s.systemMode === "replace" ? "S⇄" : "S+") : "S"}</span>`, "sys prompt", s.systemPrompt ? (s.systemMode === "replace" ? "<b style='color:var(--run)'>replaces</b> Claude Code's" : "appended to Claude Code's") : "none") +
     row(ckLights(s), "context in", `CLAUDE.md ${s.useClaudeMd ? "on" : "off"} · memory ${s.useMemory === false ? "<b style='color:var(--run)'>off</b>" : "on"} · skills ${s.useSkills === false ? "<b style='color:var(--run)'>off</b>" : "on"}`) +
     (s.dirty ? row(`<span class="cknum warn">ED</span>`, "edited", "history edited: the next turn rebuilds it") : "") +
@@ -1531,6 +1551,7 @@ function renderTarmac(){
   hideEmber();
   $("back").style.display = "none";
   $("termbtn").style.display = "none";
+  $("trimbtn").style.display = "none";
   $("hdr-title").textContent = "✈ airport";
   $("hdr-icon").classList.remove("on");
   const hh = hosts(), up = Object.keys(hh).filter(hostUp);
@@ -2144,7 +2165,7 @@ function turnHtml(b, i, len){
   const d = b.depth || 0;
   const aside = d ? ` aside" style="margin-left:${asideMl(d)}px` : "";
   if (boxCollapsed(b, i, len))
-    return `<div class="chip ${cls}${aside}" data-tgl="${b.key}" title="${esc((b.text || "").slice(0, 300)).replace(/"/g, "&quot;")}">${esc(chipLabel(b))}</div>`;
+    return `<div class="chip ${cls}${b.trimmed ? " trimmed" : ""}${aside}" data-tgl="${b.key}" title="${b.trimmed ? esc(b.trimmed) + " in the real context (auto-trim) · " : ""}${esc((b.text || "").slice(0, 300)).replace(/"/g, "&quot;")}">${b.trimmed ? "✂ " : ""}${esc(chipLabel(b))}</div>`;
   const forced = fmtOverride[view + ":" + b.key];
   const fmt = forced || (b.role === "tool" ? "txt" : guessFmt(b.text || ""));
   let body;
@@ -2176,7 +2197,7 @@ function turnHtml(b, i, len){
   <div class="turn ${cls2}${b.err ? " err" : ""}${aside}">
     <div class="row1">
       <span class="who" data-tgl="${b.key}">${b.pump ? `<span class="pm">⛽</span> ` : ""}${WHO[b.role] || b.role}${b.synced ? "" : b.queued ? ` <span class="qd" title="${esc(qWait() || "goes out as the next turn when the current one lands")}">·⏭ queued${qWait() ? (qWait().startsWith("held") ? " (held)" : " (waiting)") : ""}</span>` : " ·pending"}</span>
-      <span class="when" data-tgl="${b.key}" title="${b.ts ? esc(new Date(b.ts).toLocaleString()) : ""}">${fmtT(b.ts)}</span>
+      <span class="when" data-tgl="${b.key}" title="${b.ts ? esc(new Date(b.ts).toLocaleString()) : ""}">${fmtT(b.ts)}</span>${b.trimmed ? `<span class="trm" title="auto-trim cut this from the plane's real context; the box still shows what it was">${esc(b.trimmed)}</span>` : ""}
       <span class="grow"></span>
       <button class="bbtn${forced ? " forced" : ""}" data-fmt="${b.key}">${fmt}</button>
       <button class="bbtn" data-edit="${b.key}">✎</button>
@@ -2200,7 +2221,7 @@ function renderSession(){
   $("hdr-title").textContent = (hu ? "" : (s.emoji || emojiFor(view, s)) + " ") + (s.title || view);
   const hot = s.running ? "flying" : isHot(s) ? `hot ${ago(s.lastRunEndedAt)}` : "cold";
   const off = !hostUp(s.host);
-  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")}${s.lastToken || s.token ? " · t" + (s.lastToken || s.token) + (s.token ? "" : "(auto)") : ""} · ${hot} · ${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}${(Number(s.indent) || 0) ? " · ⇥" + s.indent : ""}`;
+  $("hdr-sub").textContent = `${s.host || "?"}${off ? "⚠" : ""} · ${s.cwd || "?"} · ${(s.model || "fable-5").replace("claude-","")}${s.lastToken || s.token ? " · t" + (s.lastToken || s.token) + (s.token ? "" : "(auto)") : ""} · ${hot} · ${s.ctxEst ? "~" : ""}${fmtTok(s.totalTokens)} ctx${s.systemPrompt ? (s.systemMode === "replace" ? " · sys⇄" : " · sys+") : ""}${s.useClaudeMd ? " · 📋md" : ""}${s.useMemory === false ? " · mem✗" : ""}${s.useSkills === false ? " · skills✗" : ""}${s.dirty ? " · edited⟲" : ""}${(Number(s.indent) || 0) ? " · ⇥" + s.indent : ""}`;
   const ind = Number(s.indent) || 0;
   const ib = $("indent");
   ib.classList.toggle("act", ind > 0);
@@ -2222,6 +2243,10 @@ function renderSession(){
   const fb = $("filesbtn");
   fb.style.display = wide ? "none" : "block";
   fb.classList.toggle("act", !!pg);
+  const trb = $("trimbtn");
+  trb.style.display = (doc[0].towerFeatures || {}).ctxtrim ? "block" : "none";
+  trb.classList.toggle("act", !!s.ctxTrim);
+  trb.title = s.ctxTrim ? "✂ trimmed: ↶ undo is open until the next turn" : "✂ trim: shrink this plane's context";
   const tb = $("termbtn");
   tb.style.display = "block";
   tb.classList.toggle("act", termOn);
@@ -2275,6 +2300,7 @@ function renderEmber(s){
   $("laybtn").style.display = "none";
   $("filesbtn").style.display = "none";
   $("termbtn").style.display = "none";
+  $("trimbtn").style.display = "none";
   $("termwrap").classList.remove("on");
   feedEl.classList.remove("on");
   composer.classList.remove("on");
@@ -2351,6 +2377,7 @@ function renderNote(s){
   $("laybtn").style.display = "none";
   $("filesbtn").style.display = "none";
   $("termbtn").style.display = "none";
+  $("trimbtn").style.display = "none";
   $("termwrap").classList.remove("on");
   feedEl.classList.remove("on");
   composer.classList.remove("on");
@@ -2435,7 +2462,7 @@ async function mountNote(s){
 const qWait = () => (sess(view) || {}).queueWait || "";
 function boxSig(b, i, len){
   return JSON.stringify([b.role, b.text, b.ts, !!b.synced, !!b.queued, b.queued && !b.synced ? qWait() : "", !!b.err, !!b.sys, !!b.brief, b.stats || null, b.depth || 0,
-    boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null]);
+    boxCollapsed(b, i, len), editing === b.key, confirming === b.key, fmtOverride[view + ":" + b.key] || null, b.trimmed || null]);
 }
 // a ▸ Write/Edit tool box → {rel, kind} when its file sits under the plane's cwd (file_path leads the JSON,
 // so the daemon's 300-char cut doesn't lose it). Bash-made files don't show up here.
@@ -3559,6 +3586,84 @@ function closeTerm(){
   if (tw) tw.classList.remove("on");
 }
 window.addEventListener("resize", () => { if (term && termFit) { try { termFit.fit(); } catch (_) {} } });
+// ---------- ✂ auto-trim: shrink the plane's REAL context ----------
+// The ground crew holding the transcript does the work (ctxtrim.js): cheapest loss
+// first (truncate big old tool results → remove them → drop old thinking → collapse
+// old tool-call inputs), never the last two turns, never your or Claude's text.
+function trimReq(id, op, extra){
+  return new Promise((resolve) => {
+    const reqId = Math.random().toString(36).slice(2, 10);
+    fsReqs.set(reqId, resolve);
+    send(Object.assign({ type: "ctxtrim", reqId, session: id, op }, extra || {}));
+    setTimeout(() => { if (fsReqs.has(reqId)) { fsReqs.delete(reqId); resolve({ ok: false, error: "no answer (timeout)" }); } }, 65000);
+  });
+}
+function trimSheet(){
+  const id = view;
+  if (!id || !sess(id)) return;
+  let plan = null, pick = 0.1, msg = "";
+  const ov = sheet(`<div class="trim"><h3>✂ trim context <span style="color:var(--dim);font-weight:400">· ${esc(sess(id).title || id)}</span></h3><div id="tr-body"></div>
+    <div class="btns"><button data-x>close</button><button class="go" id="tr-go" disabled>✂ trim</button></div></div>`);
+  const body = ov.querySelector("#tr-body"), go = ov.querySelector("#tr-go");
+  const K = (n) => fmtTok(Math.round(n || 0));
+  const usd = (x) => "$" + (x >= 1 ? x.toFixed(2) : x.toFixed(3));
+  const blocked = () => { const s = sess(id) || {}; return s.running ? "the plane is flying: trim after it lands" : s.ctxTrimming ? "trimming…" : ""; };
+  function draw(){
+    if (!document.body.contains(ov)) return;
+    const s = sess(id) || {}, t = s.ctxTrim, why = blocked();
+    let h = msg ? `<div class="note" style="margin:0 0 8px;color:${msg.startsWith("✗") ? "var(--bad)" : "var(--hot)"}">${esc(msg)}</div>` : "";
+    if (t) h += `<div class="undo">Trimmed ${esc(ago(t.at))} ago: ${K(t.before)} → ~${K(s.totalTokens)}${t.keys && t.keys.length ? ` · ${t.keys.length} box(es) marked ✂` : ""}.
+      <button id="tr-undo"${why ? " disabled" : ""} style="margin-left:6px">↶ undo</button>
+      <div class="hint">Puts the original transcript back (its cache may still be warm). Open until the next turn.</div></div>`;
+    if (!plan) h += `<div class="hint">reading the transcript on ${esc(s.sidHost || s.host || "?")}…</div>`;
+    else if (!plan.ok) h += `<div class="note" style="color:var(--bad)">✗ ${esc(plan.error || "failed")}</div>`;
+    else {
+      const b = plan.breakdown, tot = plan.tokens || 1;
+      const row = (k, v, keep) => `<div class="trow${keep ? " keep" : ""}"><span class="k">${k}</span><span class="v">${K(v)}</span><span class="b"><i style="width:${Math.min(100, (v || 0) / tot * 100).toFixed(1)}%"></i></span></div>`;
+      h += `<div class="note" style="margin:0 0 6px">Context now <b>${s.ctxEst ? "~" : ""}${K(plan.tokens)}</b>${s.ctxEst ? " (estimated: exact after the next turn)" : " (measured on the last turn)"} · ${plan.turns} turn${plan.turns === 1 ? "" : "s"}. What it's made of (≈):</div>` +
+        row("tool results", b.results) + row("tool calls (inputs)", b.calls) + row("thinking", b.thinking) +
+        row("text (yours + Claude's)", b.text, true) + row("reminders / attachments", b.other, true) + row("system prompt + tools", plan.base, true) +
+        `<div class="hint">the last two turns (~${K(plan.protected)}) are protected; text, reminders and the system prompt are never trimmed</div>`;
+      h += `<label>trim by</label><div class="picks">` + plan.plans.map((p) =>
+        `<button data-frac="${p.frac}" class="${p.frac === pick ? "on" : ""}">−${Math.round(p.frac * 100)}%<small>→ ~${K(p.after)}</small></button>`).join("") + `</div>`;
+      const p = plan.plans.find((x) => x.frac === pick) || plan.plans[0], c = p.counts, sv = p.saved;
+      const steps = [[c.truncate, `truncate ${c.truncate} big old tool result${c.truncate === 1 ? "" : "s"} to head + tail`, sv.truncate],
+        [c.remove, `remove ${c.remove} old tool result${c.remove === 1 ? "" : "s"} (a note says what was there)`, sv.remove],
+        [c.thinking, `drop ${c.thinking} old thinking block${c.thinking === 1 ? "" : "s"}`, sv.thinking],
+        [c.collapse, `collapse ${c.collapse} old tool-call input${c.collapse === 1 ? "" : "s"}`, sv.collapse]].filter((x) => x[0]);
+      h += steps.length ? `<ul>${steps.map(([, txt, tk]) => `<li>${esc(txt)} <span style="color:var(--dim)">−${K(tk)}</span></li>`).join("")}</ul>` : `<div class="note">nothing old enough to trim</div>`;
+      if (!p.reached && steps.length) h += `<div class="note" style="color:var(--run)">Only −${K(p.cut)} is trimmable before reaching protected or untouchable material.</div>`;
+      const pr = plan.price;
+      h += `<div class="note">Est. ${K(plan.tokens)} → <b>~${K(p.after)}</b>. ` + (pr
+        ? `💸 The next turn re-reads the whole context <b>cold</b>: one cache write ≈ <b>${usd(p.after * pr.w1 / 1e6)}</b> (a warm turn now reads ≈ ${usd(plan.tokens * pr.read / 1e6)}). After that, every turn reads ${K(p.cut)} less (≈ ${usd(p.cut * pr.read / 1e6)} saved per turn).`
+        : `💸 The next turn re-reads the whole context cold (one full cache write).`) +
+        ` The original is kept as a backup, and ↶ undo works until the next turn. Trimmed boxes get a ✂ mark; the boxes keep showing the original.</div>`;
+      if (plan.biggest && plan.biggest.length) h += `<div class="hint">biggest trimmable: ${plan.biggest.map((x) => esc(x.what) + " " + K(x.tokens)).join(" · ")}</div>`;
+      go.textContent = `✂ trim ${Math.round(pick * 100)}%`;
+    }
+    if (why) h += `<div class="note" style="color:var(--run)">${esc(why)}</div>`;
+    body.innerHTML = h;
+    go.disabled = !!why || !plan || !plan.ok || !(plan.plans.find((x) => x.frac === pick) || {}).cut;
+    body.querySelectorAll("[data-frac]").forEach((el) => el.addEventListener("click", () => { pick = Number(el.dataset.frac); draw(); }));
+    const ub = body.querySelector("#tr-undo");
+    if (ub) ub.addEventListener("click", async () => {
+      ub.disabled = true; go.disabled = true;
+      const r = await trimReq(id, "undo");
+      msg = r.ok ? "↶ undone: the original transcript is back" : "✗ undo: " + (r.error || "failed");
+      await load();
+    });
+  }
+  async function load(){ plan = null; draw(); plan = await trimReq(id, "plan"); draw(); }
+  go.addEventListener("click", async () => {
+    const frac = pick;
+    go.disabled = true; go.textContent = "✂ trimming…";
+    const r = await trimReq(id, "apply", { frac });
+    msg = r.ok ? `✓ trimmed: ${K(r.before)} → ~${K(r.after)}${r.marked ? ` · ${r.marked} box(es) marked ✂` : ""}` : "✗ " + (r.error || "failed");
+    await load();
+  });
+  load();
+}
+$("trimbtn").addEventListener("click", () => { if (view) trimSheet(); });
 $("termbtn").addEventListener("click", () => {
   if (!view) return;
   if (termOn) { closeTerm(); renderSession(); return; }

@@ -11,6 +11,7 @@
 //        cache-hot here.
 //   ← {type:"interrupt", session}          SIGTERM the run's process group
 //   ← {type:"fs", reqId, session, cwd, op:list|read|write, rel, text, ifAbsent}
+//   ← {type:"ctxtrim", reqId, session, op:plan|apply|undo, …}   ✂ auto-trim (ctxtrim.js)
 //   → {type:"addbox"|"run-done"|"fs-res", …}
 //
 // Config (env, or KEY=VALUE lines in <state>/.env):
@@ -212,6 +213,63 @@ function trimTranscript(cwd, sid, text) {
   return lines.length - cut;
 }
 
+// ---------- ✂ auto-trim: shrink the REAL transcript by a fraction (see ctxtrim.js) ----------
+//   ← {type:"ctxtrim", reqId, session, op:"plan"|"apply"|"undo", cwd, sid, ctx, model, frac, undo:{backup,size,mtimeMs}}
+//   → {type:"ctxtrim-res", reqId, session, op, ok, error?, …}
+// apply keeps the original next to the file as <sid>.jsonl.pretrim-<stamp> (the
+// CLI only reads *.jsonl), writes the trimmed copy atomically under the SAME
+// name, and keeps the newest 3 backups per session. undo renames the backup
+// back — only while the file is exactly what the trim wrote.
+const ctxtrim = require("./ctxtrim.js");
+function ctxTrimOp(m) {
+  const res = { type: "ctxtrim-res", reqId: m.reqId, session: m.session, op: m.op, ok: true };
+  try {
+    if (procs.has(m.session)) throw new Error("the plane is flying");
+    if (!/^[0-9a-f-]{36}$/i.test(String(m.sid || ""))) throw new Error("no transcript to trim yet");
+    const dir = path.join(os.homedir(), ".claude", "projects", encodeCwd(effectiveCwd(m.session, m.cwd).cwd));
+    const file = path.join(dir, m.sid + ".jsonl");
+    if (!fs.existsSync(file)) throw new Error("transcript not found on " + HOST_NAME);
+    const p = priceFor(m.model);
+    if (m.op === "plan") {
+      const A = ctxtrim.analyse(fs.readFileSync(file, "utf8"), Number(m.ctx) || 0, [0.1, 0.25, 0.5]);
+      Object.assign(res, A.summary, { price: p ? { w1: p.w1, read: p.read } : null });
+    } else if (m.op === "apply") {
+      const frac = Number(m.frac);
+      if (!(frac > 0 && frac < 0.95)) throw new Error("bad fraction");
+      const st0 = fs.statSync(file);
+      if (Date.now() - st0.mtimeMs < 5000) throw new Error("the transcript changed seconds ago — is it in use elsewhere?");
+      const text = fs.readFileSync(file, "utf8");
+      const A = ctxtrim.analyse(text, Number(m.ctx) || 0, [frac]), pl = A.plans[frac];
+      if (!pl.p.edits.length) throw new Error("nothing old enough to trim (the last two turns are protected)");
+      const now = new Date(), pad = (n) => String(n).padStart(2, "0");
+      const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const R = ctxtrim.apply(A.P, pl.p.edits, day);
+      const backup = `${m.sid}.jsonl.pretrim-${day.replace(/-/g, "")}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      fs.copyFileSync(file, path.join(dir, backup));
+      const tmp = file + ".trim-tmp";
+      fs.writeFileSync(tmp, R.text, { mode: st0.mode & 0o777 });
+      if (fs.statSync(file).mtimeMs !== st0.mtimeMs) { fs.unlinkSync(tmp); fs.unlinkSync(path.join(dir, backup)); throw new Error("the transcript changed while trimming — try again"); }
+      fs.renameSync(tmp, file);
+      const st = fs.statSync(file);
+      const olds = fs.readdirSync(dir).filter((n) => n.startsWith(m.sid + ".jsonl.pretrim-")).sort();
+      for (const n of olds.slice(0, -3)) { try { fs.unlinkSync(path.join(dir, n)); } catch (_) {} }
+      Object.assign(res, pl.view, { before: A.cal.tokens, marks: R.marks, dropped: R.dropped, backup, size: st.size, mtimeMs: st.mtimeMs,
+        bytes: [text.length, R.text.length], price: p ? { w1: p.w1, read: p.read } : null });
+      log(`✂ auto-trim (${m.session}) ${m.sid}: −${Math.round(frac * 100)}% → cut ~${pl.view.cut} tok (${JSON.stringify(pl.view.counts)}), backup ${backup}`);
+    } else if (m.op === "undo") {
+      const u = m.undo || {};
+      if (!String(u.backup || "").startsWith(m.sid + ".jsonl.pretrim-") || /[\/\\]/.test(u.backup)) throw new Error("no trim to undo");
+      const bk = path.join(dir, u.backup);
+      if (!fs.existsSync(bk)) throw new Error("the backup is gone");
+      const st = fs.statSync(file);
+      if (st.size !== u.size || Math.abs(st.mtimeMs - u.mtimeMs) > 1) throw new Error("the transcript changed since the trim — undo would lose that");
+      fs.renameSync(bk, file);
+      log(`✂ auto-trim undone (${m.session}) ${m.sid}: restored ${u.backup}`);
+    } else throw new Error("unknown op");
+  } catch (e) { res.ok = false; res.error = e.message; log(`✂ auto-trim ${m.op} (${m.session}) refused: ${e.message}`); }
+  towerSend(res);
+}
+
 // ---------- running turns ----------
 const procs = new Map(); // session id -> ChildProcess
 
@@ -338,17 +396,13 @@ function run(cmd, attempt = 0) {
         if (ev.message?.usage) lastMsgUsage = ev.message.usage; // ctx size = LAST call, not the run's sum
         for (const c of ev.message?.content || []) {
           if (c.type === "text" && c.text?.trim()) addBox(id, "ai", c.text, { synced: true });
-          if (c.type === "tool_use") {
-            const inp = JSON.stringify(c.input || {});
-            addBox(id, "tool", `▸ ${c.name}  ${inp.length > 300 ? inp.slice(0, 300) + "…" : inp}`, { synced: true });
-          }
+          if (c.type === "tool_use") addBox(id, "tool", ctxtrim.toolUseBoxText(c), { synced: true });
         }
       } else if (ev.type === "user") {
         for (const c of ev.message?.content || []) {
           if (c.type === "tool_result") {
-            let t = typeof c.content === "string" ? c.content : (c.content || []).map((x) => x.text || "").join("\n");
-            if (t.length > 1500) t = t.slice(0, 1500) + `\n… [${t.length} chars]`;
-            if (t.trim()) addBox(id, "tool", t, { synced: true, result: true });
+            const t = ctxtrim.toolResultBoxText(c);
+            if (t) addBox(id, "tool", t, { synced: true, result: true });
           }
         }
       } else if (ev.type === "result") finalResult = ev;
@@ -569,7 +623,7 @@ let towerWs = null, pendingWs = null, connecting = false, lastAttempt = 0, recon
 const OUTBOX = [];              // [{ s: json, type, session }]
 let outboxBytes = 0;
 const OUTBOX_MAX = 20_000_000;
-const KEEP = new Set(["addbox", "run-done", "update"]);
+const KEEP = new Set(["addbox", "run-done", "update", "ctxtrim-res"]);
 function towerSend(obj) {
   const s = JSON.stringify(obj);
   if (towerWs && towerWs.readyState === 1 && !OUTBOX.length) {
@@ -652,6 +706,7 @@ function connect() {
         info: { platform: os.platform(), sessRoot: SESS_ROOT, roots: WHITELIST,
                 defaultModel: DEFAULT_MODEL, claudeVersion: CLAUDE_VERSION, tokens: TOKENS.length,
                 maxTurns: MAX_CONCURRENT_TURNS, activeToken: TOKENS.length ? tokenIdx + 1 : 0,
+                ctxtrim: 1,
                 flying: [...procs.keys()],
                 pendingDone: OUTBOX.filter((x) => x.type === "run-done" && x.session).map((x) => x.session) } }));
     } catch (_) {}
@@ -666,6 +721,7 @@ function connect() {
     if (m.type === "run" && m.session && m.meta) { run(m); return; }
     if (m.type === "interrupt" && m.session) { interrupt(m.session); return; }
     if (m.type === "fs" && m.reqId) { fsOp(m); return; }
+    if (m.type === "ctxtrim" && m.reqId) { ctxTrimOp(m); return; }
     if (m.type === "term" && m.termId) {
       if (m.action === "open") termOpen(m);
       else if (m.action === "in") { const c = terms.get(m.termId); if (c) { try { c.stdin.write(String(m.data || "")); } catch (_) {} } }

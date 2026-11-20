@@ -167,11 +167,13 @@ function armLimbo(host) {
 // boot cleanup: daemons re-report. Running planes go into limbo (their crews will say
 // whether they're still flying); hosts are offline until they dial in.
 const bootLimbo = new Set();
-for (const [id, s] of Object.entries(doc[0].sessions || {}))
+for (const [id, s] of Object.entries(doc[0].sessions || {})) {
+  if (s && s.ctxTrimming) shelf_merge(doc, { sessions: { [id]: { ctxTrimming: null } } }); // a ✂ trim cut off by the restart (its result still lands)
   if (s && (s.running || s.state === "processing")) {
     shelf_merge(doc, { sessions: { [id]: { state: "offline" } } });
     if (s.running) bootLimbo.add(s.host); else shelf_merge(doc, { sessions: { [id]: { running: false } } });
   }
+}
 setTimeout(() => { for (const h of bootLimbo) armLimbo(h); }, 0);
 for (const [h, v] of Object.entries(doc[0].hosts || {}))
   if (v && v.online) shelf_merge(doc, { hosts: { [h]: { online: false } } });
@@ -219,6 +221,34 @@ function hostSocket(hostName) {
   return null;
 }
 const fsWaiters = new Map(); // reqId -> browser socket
+const trimWaiters = new Map(); // reqId -> {ws, session, op}
+
+// ---------- ✂ auto-trim (the work is ctxtrim.js on the ground crew holding the transcript) ----------
+// The page's tool boxes are a mirror, so a trimmed item's box is found by its text
+// (the crew sends the exact box text it streamed); duplicates pair up newest-first.
+function trimMarks(s, marks) {
+  const pool = new Map();
+  for (const b of orderedBoxes(s)) if (b.role === "tool" && !b.sys && !b.err) {
+    const a = pool.get(b.text); if (a) a.push(b.key); else pool.set(b.text, [b.key]);
+  }
+  const out = {};
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const a = pool.get(String(marks[i].text));
+    if (a && a.length) out[a.pop()] = String(marks[i].mark || "✂");
+  }
+  return out;
+}
+const fmtTokK = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : Math.round((n || 0) / 1000) + "k");
+function trimNote(m) {
+  const c = m.counts || {}, plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+  const parts = [c.truncate && "trimmed " + plural(c.truncate, "big tool result", "big tool results"),
+    c.remove && "removed " + plural(c.remove, "tool result", "tool results"),
+    c.thinking && "dropped " + plural(c.thinking, "thinking block", "thinking blocks"),
+    c.collapse && "collapsed " + plural(c.collapse, "tool-call input", "tool-call inputs")].filter(Boolean);
+  const cost = m.price ? ` ≈ $${((m.after || 0) * m.price.w1 / 1e6).toFixed(2)}` : "";
+  return `✂ auto-trim −${Math.round((m.frac || 0) * 100)}%: ${fmtTokK(m.before)} → ~${fmtTokK(m.after)} ctx. ${parts.join(", ")} (oldest material only; the last two turns and all your and Claude's text untouched).` +
+    `\nThe next turn re-reads the whole context cold: one cache write${cost}. The original is kept: ↶ undo in the ✂ panel until the next turn.`;
+}
 const termOwners = new Map(); // termId -> {ws (browser), hostName}
 
 // ---------- run routing (the ⚡): tower builds a self-contained command ----------
@@ -227,6 +257,7 @@ function routeRun(id, text, fail) {
   if (!s) return fail("no such session");
   if (s.kind) return fail(s.kind === "note" ? "that's a 📝 note — nothing to fly" : "that's a " + s.kind + " tile — nothing to fly");
   if (s.running) return fail("already running");
+  if (s.ctxTrimming) return fail("✂ trimming the context — a moment");
   if (typeof text === "string" && text.trim()) addBox(id, "user", text.trim().slice(0, 64 * 1024));
   const host = hostSocket(s.host);
   if (!host) return fail("no ground crew online for '" + (s.host || "?") + "'");
@@ -273,7 +304,7 @@ function routeRun(id, text, fail) {
 
 // capability flags the page checks before using newer messages (a hot-reloaded page
 // can meet an older tower until the restart)
-setTimeout(() => { if (!(doc[0].towerFeatures || {}).pump) apply({ towerFeatures: { queue: 1, pump: 1, icons: 1 } }); }, 0);
+setTimeout(() => { if (!(doc[0].towerFeatures || {}).ctxtrim) apply({ towerFeatures: { queue: 1, pump: 1, icons: 1, ctxtrim: 1 } }); }, 0);
 
 // ⏭ the queue flies itself: after a clean landing, the trailing unsynced user
 // boxes (queued ones + anything ＋-stowed alongside) go out as the next turn.
@@ -1325,6 +1356,7 @@ wss.on("connection", (ws, req) => {
       const patch = { running: false, state: "ready", lastRunEndedAt: Date.now(),
         turns: (s.turns || 0) + 1, dirty: !!(s.dirty && !m.synthed), messages: sweep };
       if (m.trimConsumed) patch.trim = null;
+      if (!m.unsent) patch.ctxTrim = null; // the CLI ran: ✂ auto-trim's undo window is closed
       // any completed run that didn't consume the trim may have grown the
       // transcript past the cut (zap landed mid-flight, or an old daemon that
       // doesn't know trim) — a stale cut would eat newer turns, so rebuild
@@ -1344,7 +1376,7 @@ wss.on("connection", (ws, req) => {
             (!m.claudeSessionId || m.claudeSessionId === s.claudeSessionId)) m.stats.cost = +(m.stats.total - s.costTotal).toFixed(7);
         patch.lastCost = m.stats.cost == null ? null : m.stats.cost; patch.lastMs = m.stats.ms || 0;
         if (m.stats.total) patch.costTotal = m.stats.total; // the CLI's running total for this transcript
-        patch.totalTokens = m.stats.ctx || 0;
+        patch.totalTokens = m.stats.ctx || 0; patch.ctxEst = null;
         patch.hotUntil = Date.now() + HOT_MS;
         // pin the run's stats on its last ai box (per-box statline in the UI)
         if (m.stats.ms || m.stats.cost || m.stats.total) {
@@ -1385,6 +1417,70 @@ wss.on("connection", (ws, req) => {
       setTimeout(() => fsWaiters.delete(m.reqId), 30000);
       try { host.send(JSON.stringify({ type: "fs", reqId: m.reqId, session: m.session, cwd: s.cwd || "", op: m.op, rel: m.rel || "", text: m.text, b64: m.b64, ifAbsent: m.ifAbsent, sub: m.sub, hash: m.hash })); }
       catch (_) { fsWaiters.delete(m.reqId); bounce("host send failed"); }
+      return;
+    }
+    if (m.type === "ctxtrim" && ws._role === "browser" && typeof m.session === "string" && m.reqId) {
+      const s = sess(m.session), op = String(m.op || "");
+      const bounce = (error) => { try { ws.send(JSON.stringify({ type: "ctxtrim-res", reqId: m.reqId, op, ok: false, error })); } catch (_) {} };
+      if (!s || s.kind) return bounce("no such plane");
+      if (!["plan", "apply", "undo"].includes(op)) return bounce("unknown op");
+      if (!s.claudeSessionId || !s.sidHost) return bounce("no transcript yet: fly a turn first");
+      if (s.running) return bounce("the plane is flying: trim after it lands");
+      if (s.ctxTrimming) return bounce("already trimming");
+      if (op === "undo" && !(s.ctxTrim && s.ctxTrim.backup)) return bounce("nothing to undo (a turn has run since the last trim)");
+      if (op !== "undo") {
+        if (s.dirty) return bounce("history was edited: the next turn rebuilds a text-only transcript anyway");
+        if (s.forkNext) return bounce("this fork hasn't flown yet: its transcript is still its parent's");
+        if (s.sidHost !== s.host) return bounce(`the plane moved to ${s.host}: the next turn rebuilds its transcript there anyway`);
+      }
+      const host = hostSocket(s.sidHost);
+      if (!host) return bounce(`the ground crew on ${s.sidHost} (it holds the transcript) is offline`);
+      if (!((doc[0].hosts || {})[s.sidHost] || {}).ctxtrim) return bounce(`the ground crew on ${s.sidHost} needs a restart to learn ✂ trim`);
+      trimWaiters.set(m.reqId, { ws, session: m.session, op });
+      if (op !== "plan") apply({ sessions: { [m.session]: { ctxTrimming: true } } });
+      setTimeout(() => {
+        if (!trimWaiters.has(m.reqId)) return;
+        trimWaiters.delete(m.reqId);
+        if (op !== "plan" && sess(m.session)) apply({ sessions: { [m.session]: { ctxTrimming: null } } });
+        bounce("the ground crew didn't answer in time");
+      }, 60000);
+      const t = s.ctxTrim || {};
+      try { host.send(JSON.stringify({ type: "ctxtrim", reqId: m.reqId, session: m.session, op, frac: Number(m.frac) || 0,
+        cwd: s.cwd || "", sid: s.claudeSessionId, ctx: Number(s.totalTokens) || 0, model: s.model || "",
+        undo: op === "undo" ? { backup: t.backup, size: t.size, mtimeMs: t.mtimeMs } : undefined })); }
+      catch (_) { trimWaiters.delete(m.reqId); if (op !== "plan") apply({ sessions: { [m.session]: { ctxTrimming: null } } }); bounce("host send failed"); }
+      return;
+    }
+    if (m.type === "ctxtrim-res" && ws._role === "host" && m.reqId) {
+      // no waiter (the tower restarted, or the page gave up): a finished apply/undo still lands on the doc
+      const w = trimWaiters.get(m.reqId) || (m.op !== "plan" && typeof m.session === "string" ? { ws: null, session: m.session, op: m.op } : null);
+      if (!w) return;
+      trimWaiters.delete(m.reqId);
+      const s = sess(w.session);
+      if (s && w.op !== "plan") {
+        const patch = { ctxTrimming: null };
+        if (m.ok && w.op === "apply") {
+          const marked = trimMarks(s, Array.isArray(m.marks) ? m.marks : []);
+          patch.messages = {};
+          for (const [k, mark] of Object.entries(marked)) patch.messages[k] = { trimmed: mark };
+          patch.ctxTrim = { at: Date.now(), backup: m.backup, size: m.size, mtimeMs: m.mtimeMs, frac: m.frac, cut: m.cut,
+            before: Number(s.totalTokens) || 0, beforeEst: !!s.ctxEst, hotUntil: s.hotUntil || 0, keys: Object.keys(marked) };
+          patch.totalTokens = m.after; patch.ctxEst = true; patch.hotUntil = 0; // the cache prefix is gone: cold
+          apply({ sessions: { [w.session]: patch } });
+          addBox(w.session, "tool", trimNote(m), { synced: true, sys: true });
+          log(`✂ auto-trim ${w.session}: ${m.before} → ~${m.after} (${JSON.stringify(m.counts)}), ${Object.keys(marked).length} box(es) marked`);
+          m.marked = Object.keys(marked).length; delete m.marks;
+        } else if (m.ok && w.op === "undo") {
+          const t = s.ctxTrim || {};
+          patch.messages = {};
+          for (const k of t.keys || []) if ((s.messages || {})[k]) patch.messages[k] = { trimmed: null };
+          patch.totalTokens = t.before || s.totalTokens; patch.ctxEst = t.beforeEst || null; patch.hotUntil = t.hotUntil || 0; patch.ctxTrim = null;
+          apply({ sessions: { [w.session]: patch } });
+          addBox(w.session, "tool", `✂ auto-trim undone: the original transcript is back (${fmtTokK(t.before)} ctx${t.hotUntil > Date.now() ? ", and its cache is still warm" : ""}).`, { synced: true, sys: true });
+          log(`✂ auto-trim undone ${w.session}`);
+        } else apply({ sessions: { [w.session]: patch } });
+      }
+      if (w.ws && w.ws.readyState === 1) { try { w.ws.send(JSON.stringify(m)); } catch (_) {} }
       return;
     }
     // ---- terminals: browser <-> the session's ground crew, tower relays ----
