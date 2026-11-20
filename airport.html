@@ -343,6 +343,7 @@
   .fvpre{ margin:0; font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre; color:var(--ink); }
   .fvbody.fvedit{ padding:0; overflow:hidden; position:relative; }
   .fveditor{ position:absolute; inset:0; color:var(--dim); font:11px ui-monospace,Menlo,monospace; }
+  .fvhead .fvopen{ flex:0 0 auto; border:1px solid var(--rule); color:var(--dim); border-radius:6px; padding:1px 7px; font-size:10px; text-decoration:none; }
   .fvhead button.dirty{ border-color:var(--run); color:var(--run); }
   .fvframe{ width:100%; height:100%; border:none; background:#fff; display:block; }
   .fvimg{ max-width:100%; }
@@ -3738,6 +3739,12 @@ addEventListener("popstate", (e) => {
   if (!p) colsFor = null;
   if (view) render();
 });
+// a plane's file as a real URL on the tower (GET /p/<serveKey>/<plane>/<path>): relative images/CSS/links work
+function fileUrl(rel){
+  const k = (doc[0] || {}).serveKey;
+  if (!k || !view || !rel) return "";
+  return BASE + "/p/" + k + "/" + encodeURIComponent(view) + "/" + String(rel).split("/").map(encodeURIComponent).join("/");
+}
 const phBack = () => !wideMode() && phonePage ? `<button class="phback" title="back">‹</button>` : "";
 ["explorer", "fileview"].forEach((id) => $(id).addEventListener("click", (e) => { if (e.target.closest(".phback")) phoneBack(); }));
 $("filesbtn").addEventListener("click", () => { if (phonePage) { phoneHome(); render(); } else phoneGo("tree"); });
@@ -4037,15 +4044,15 @@ function renderFileView(){
   else if (!d.ok) body = `<div class="fvnote">✗ ${esc(d.error || "read failed")}</div>`;
   else if (fmt === "img") body = d.b64 ? `<img class="fvimg" src="data:${esc(d.mime || "image/png")};base64,${d.b64}">` : `<div class="fvnote">image too large to preview · ${fmtSize(d.size)}</div>`;
   else if (d.binary) body = `<div class="fvnote">binary · ${fmtSize(d.size)}</div>`;
-  else if (fmt === "html") body = `<iframe class="fvframe" sandbox="allow-scripts"></iframe>`;
+  else if (fmt === "html") body = fileUrl(st.sel) ? `<iframe class="fvframe" sandbox="allow-scripts allow-popups" src="${esc(fileUrl(st.sel))}"></iframe>` : `<iframe class="fvframe" sandbox="allow-scripts"></iframe>`;
   else if (fmt === "md") body = `<div class="text md">${mdHtml(d.text || "")}</div>`;
   else body = `<pre class="fvpre">${esc(d.text || "")}</pre>` + (d.truncated ? `<div class="fvnote">truncated at 512k of ${fmtSize(d.size)}</div>` : "");
   fv.innerHTML = `
     <div class="fvhead">${phBack()}<span class="fvpath">${esc(st.sel)}</span><span class="fvsize">${d && d.size != null ? fmtSize(d.size) : ""}</span>
-      ${auto === "img" ? "" : `<button id="fvfmt">${fmt}</button>`}${d && d.ok && !d.binary && auto !== "img" ? `<button id="fvedit" title="edit">✎</button>` : ""}<button id="fvref" title="reload">↻</button></div>
+      ${auto === "img" ? "" : `<button id="fvfmt">${fmt}</button>`}${d && d.ok && !d.binary && auto !== "img" ? `<button id="fvedit" title="edit">✎</button>` : ""}<button id="fvref" title="reload">↻</button>${fileUrl(st.sel) ? `<a class="fvopen" href="${esc(fileUrl(st.sel))}" target="_blank" rel="noreferrer" title="open full screen in its own tab (images, CSS and links work)">↗</a>` : ""}</div>
     <div class="fvbody">${body}</div>`;
   const fr = fv.querySelector(".fvframe");
-  if (fr) fr.srcdoc = d.text || "";
+  if (fr && !fr.getAttribute("src")) fr.srcdoc = d.text || "";   // no file URL yet (older tower): inline, no relative assets
   const fb = fv.querySelector("#fvfmt");
   if (fb) fb.addEventListener("click", () => {
     const cyc = ["txt","md","html"];

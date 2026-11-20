@@ -10,6 +10,7 @@
 //
 //   HTTP  GET  /            airport.html (page-version stamped for self-reload)
 //         GET  /pagever     {v}
+//         GET  /p/<serveKey>/<plane>/<path>   a plane's file over plain HTTP (see "plane files over plain HTTP")
 //         GET  /sw.js       the page's service worker (offline reloads open the last copy)
 //         GET  /health      {ok, ...}
 //         GET  /doc?pass=   the shelf doc (register-script verification / debug)
@@ -220,7 +221,50 @@ function hostSocket(hostName) {
   for (const c of clients) if (c._role === "host" && c._host === hostName && c.readyState === 1) return c;
   return null;
 }
-const fsWaiters = new Map(); // reqId -> browser socket
+const fsWaiters = new Map(); // reqId -> browser socket (or a {readyState, send} stand-in: servePlaneFile)
+
+// ---------- 📂 plane files over plain HTTP: GET /p/<serveKey>/<plane>/<path in its cwd> ----------
+// So an .html a plane writes shows its images, CSS and links (relative URLs resolve under the same prefix), in the
+// file viewer's iframe or full screen in its own tab. The file is read through that plane's ground crew (any
+// machine), with the same cwd/whitelist checks as the file explorer. One secret key in the URL (<state>/serve.key,
+// 600; delete it + restart the tower to revoke every link); doc.serveKey tells logged-in pages. Every response is
+// CSP-sandboxed (an opaque origin, even top-level), so a served page can't read the airport's own storage or keys.
+const SERVE_KEY = (() => { const f = path.join(STATE_DIR, "serve.key");
+  try { const k = fs.readFileSync(f, "utf8").trim(); if (k.length >= 24) return k; } catch (_) {}
+  const k = crypto.randomBytes(24).toString("base64url"); fs.writeFileSync(f, k + "\n", { mode: 0o600 }); return k; })();
+setTimeout(() => { if ((doc[0] || {}).serveKey !== SERVE_KEY) apply({ serveKey: SERVE_KEY }); }, 0);
+const SERVE_MIME = { html: "text/html", htm: "text/html", css: "text/css", js: "text/javascript", mjs: "text/javascript", json: "application/json",
+  md: "text/plain", txt: "text/plain", csv: "text/plain", svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", ico: "image/x-icon", xml: "application/xml" };
+function servePlaneFile(req, res, url) {
+  const parts = url.pathname.split("/").slice(2);   // [key, plane, ...path]
+  const fail = (code, msg) => { res.writeHead(code, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }); res.end(msg); };
+  if (parts.length < 3 || !sameSecret(parts[0] || "", SERVE_KEY)) return fail(404, "not found");
+  let id, rel; try { id = decodeURIComponent(parts[1]); rel = parts.slice(2).map(decodeURIComponent).join("/"); } catch (_) { return fail(400, "bad path"); }
+  if (!rel || rel.endsWith("/")) rel += "index.html";
+  const s = sess(id);
+  if (!s || s.kind) return fail(404, "no such plane");
+  const host = hostSocket(s.host);
+  if (!host) return fail(503, "the ground crew on " + s.host + " is offline");
+  const reqId = "p" + crypto.randomBytes(8).toString("hex");
+  let done = false;
+  const finish = (m) => {
+    if (done) return; done = true; fsWaiters.delete(reqId);
+    if (!m || !m.ok) return fail(404, (m && m.error) || "timed out");
+    const ext = (rel.split(".").pop() || "").toLowerCase(), type = SERVE_MIME[ext] || (m.mime || "application/octet-stream");
+    let body;
+    if (m.b64) body = Buffer.from(m.b64, "base64");
+    else if (m.text != null) body = Buffer.from(m.text + (m.truncated ? "\n<!-- airport: truncated at 512 KB -->" : ""), "utf8");
+    else return fail(415, "airport can't serve this file yet (binary, or an image over 2 MB) · " + (m.size || 0) + " bytes");
+    res.writeHead(200, { "Content-Type": type + (/^text\/|json|xml|javascript/.test(type) ? "; charset=utf-8" : ""), "Content-Length": body.length,
+      "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms allow-modals" });
+    res.end(body);
+  };
+  fsWaiters.set(reqId, { readyState: 1, send: (str) => { try { finish(JSON.parse(str)); } catch (_) { finish(null); } } });
+  setTimeout(() => finish(null), 30000);
+  try { host.send(JSON.stringify({ type: "fs", reqId, session: id, cwd: s.cwd || "", op: "read", rel })); } catch (_) { finish(null); }
+}
 const trimWaiters = new Map(); // reqId -> {ws, session, op}
 
 // ---------- ✂ auto-trim (the work is ctxtrim.js on the ground crew holding the transcript) ----------
@@ -1091,6 +1135,7 @@ const handler = (req, res) => {
       return res.end(buf);
     } catch (_) { res.writeHead(404); return res.end(); }
   }
+  if (req.method === "GET" && url.pathname.startsWith("/p/")) return servePlaneFile(req, res, url);
   if (req.method === "GET" && url.pathname === "/sw.js") {
     // the page's service worker: page loads only, network-first (6 s), falling back to the last copy, so a
     // reload with no connection still opens airport (with your drafts) instead of a browser error

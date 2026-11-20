@@ -388,6 +388,7 @@ Env vars, or `KEY=VALUE` lines in `~/.airport/.env` (env wins):
 | `AIRPORT_TURN_TIMEOUT_MS` | daemon | `0` *(no limit)* | optional per-turn kill switch; ◼ stop is the manual brake |
 | `AIRPORT_STATE_DIR` | both | `~/.airport` | `.env`, token state |
 | `OPENAI_API_KEY` | tower | *(unset)* | enables 🎙 dictation (and `POST /whisper`) |
+| *(file)* `~/.airport/serve.key` | tower | *(made on first start)* | the secret in plane-file URLs, `GET /p/<key>/<plane>/<path>`: an .html a plane writes is served with its images/CSS/links working (the file viewer uses it; ↗ opens it full screen). Read through the plane's ground crew with the explorer's cwd checks; every response is CSP-sandboxed. Delete the file + restart the tower to revoke all links |
 | *(file)* `~/.airport/brief.md` | tower | *(absent)* | this machine's own notes for the 🧭 briefing (ports in use, memory etiquette, local tools); appended to the generic brief, re-read on change |
 | `AIRPORT_DICTATE_MERGE_MODEL` | tower | `gpt-5.4-nano` | the model that merges the engines' versions of each dictated chunk |
 | `AIRPORT_TRANSCRIBE_MODEL` | tower | `gpt-4o-mini-transcribe` | the model behind `POST /whisper` (one-shot transcription). The tarmac's vocabulary (owner + plane ids + titles) rides along as its prompt; on a refusal it retries on `whisper-1` |
