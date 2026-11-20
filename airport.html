@@ -1967,6 +1967,7 @@ function buildCfg(cfg){
     <div class="row">
       <div style="flex:2.5"><label>title</label><input id="c-title" value="${esc(s.title || "")}"></div>
       <div><label>icon</label><input id="c-emoji" value="${esc(s.emoji || "🛩")}"></div>
+      <div style="flex:0 0 auto;align-self:flex-end"><button id="c-repic" title="ask icon watch for a fresh picture from the plane's current title and conversation (within ~a minute)">🎨 redo picture</button></div>
     </div>
     <div class="row">
       <div><label>airfield <span class="warn">— change = fly there; next ⚡ rebuilds context</span></label>
@@ -2011,6 +2012,16 @@ function buildCfg(cfg){
   on("c-token", (el) => { patch({ sessions: { [id]: { token: Number(el.value) || null } } });
     chint(el.value ? "pinned to t" + el.value + " — next run pays a cold prefix (cache is per account)" : "token: auto — follows the airfield's failover"); });
   on("c-model", (el) => { patch({ sessions: { [id]: { model: el.value } } }); chint("model changed — next run pays a cold prefix"); });
+  // 🎨 redo picture: blank the stored prompt, which icon watch reads as "made in an older style" → it redraws
+  // the picture from the current title + conversation on its next round (renaming a plane already does this)
+  const rp = cfg.querySelector("#c-repic");
+  if (rp) rp.addEventListener("click", () => {
+    let m = {}; try { m = JSON.parse(sess(id).iconMeta || "{}"); } catch (_) {}
+    m.prompt = "";
+    patch({ sessions: { [id]: { iconMeta: JSON.stringify(m) } } });
+    rp.disabled = true; rp.textContent = "🎨 asked ✓";
+    chint("icon watch will redraw this plane's picture within about a minute");
+  });
   on("c-cwd", (el) => {
     const cwd = el.value.trim();
     if (cwd === (sess(id).cwd || "")) return;
